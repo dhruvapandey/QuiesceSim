@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace quiescesim {
@@ -45,6 +46,15 @@ struct AssignmentIR {
   std::string target;
   Expr expression;
   std::optional<Expr> condition;
+  // Optional constant part-select on the LHS. Initial support is deliberately
+  // combinational only; clocked partial writes need masked NBA commit records.
+  std::optional<std::pair<std::uint8_t, std::uint8_t>> target_slice;
+
+  AssignmentIR(std::string target_in, Expr expression_in,
+               std::optional<Expr> condition_in = std::nullopt,
+               std::optional<std::pair<std::uint8_t, std::uint8_t>> target_slice_in = std::nullopt)
+      : target(std::move(target_in)), expression(std::move(expression_in)),
+        condition(std::move(condition_in)), target_slice(std::move(target_slice_in)) {}
 };
 
 enum class ProcessKind { combinational, posedge, posedge_or_negedge_reset };

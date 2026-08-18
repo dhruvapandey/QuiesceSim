@@ -103,6 +103,17 @@ bool condition_true(const std::optional<Expr>& condition, const std::unordered_m
   const auto value = evaluate(*condition, signals, engine);
   return value.is_known() && value.as_u64() != 0;
 }
+
+LogicWord replace_slice(LogicWord original, LogicWord replacement, std::uint8_t msb, std::uint8_t lsb) {
+  if (lsb > msb || msb >= original.width) throw std::invalid_argument("IR assignment target slice is invalid");
+  const auto width = static_cast<std::uint8_t>(msb - lsb + 1);
+  if (replacement.width != width) throw std::invalid_argument("IR assignment target slice width mismatch");
+  const auto field_mask = width == 64 ? ~std::uint64_t{0} : ((std::uint64_t{1} << width) - 1);
+  const auto positioned_mask = field_mask << lsb;
+  return {(original.bits & ~positioned_mask) | ((replacement.bits & field_mask) << lsb),
+          (original.x_mask & ~positioned_mask) | ((replacement.x_mask & field_mask) << lsb),
+          (original.z_mask & ~positioned_mask) | ((replacement.z_mask & field_mask) << lsb), original.width};
+}
 }
 
 std::unordered_map<std::string, SignalId> compile_ir(const ModuleIR& module, Engine& engine) {
@@ -134,7 +145,15 @@ std::unordered_map<std::string, SignalId> compile_ir(
       std::vector<SignalId> sensitivity(unique_sensitivity.begin(), unique_sensitivity.end());
       const auto id = engine.add_process(process.name, sensitivity, [signals, process](Engine& runtime) {
         for (const auto& assignment : process.assignments) {
-          if (condition_true(assignment.condition, signals, runtime)) runtime.write_now(signals.at(assignment.target), evaluate(assignment.expression, signals, runtime));
+          if (!condition_true(assignment.condition, signals, runtime)) continue;
+          const auto target = signals.at(assignment.target);
+          const auto value = evaluate(assignment.expression, signals, runtime);
+          if (assignment.target_slice) {
+            const auto [msb, lsb] = *assignment.target_slice;
+            runtime.write_now(target, replace_slice(runtime.read(target), value, msb, lsb));
+          } else {
+            runtime.write_now(target, value);
+          }
         }
       });
       engine.schedule_active(id);
@@ -157,6 +176,7 @@ std::unordered_map<std::string, SignalId> compile_ir(
       if (!posedge && !negedge_reset) return;
       const auto& assignments = has_reset && current_reset.is_known() && current_reset.as_u64() == 0 ? process.reset_assignments : process.assignments;
       for (const auto& assignment : assignments) {
+        if (assignment.target_slice) throw std::invalid_argument("clocked IR part-select assignment is not implemented yet");
         if (condition_true(assignment.condition, signals, runtime)) {
           runtime.write_nba(signals.at(assignment.target), evaluate(assignment.expression, signals, runtime));
         } else if (assignment.condition) {

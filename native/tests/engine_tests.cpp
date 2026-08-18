@@ -346,6 +346,23 @@ int main() {
   hierarchy_engine.run();
   require(hierarchy_engine.read(register_instance.at("q")) == LogicWord::known(0x3c, 8), "hierarchy register output did not update");
   require(hierarchy_engine.read(observer_instance.at("o")) == LogicWord::known(0xc3, 8), "cross-instance dependency did not wake observer");
+  const ModuleIR ir_part_selects{
+      "ir_part_selects",
+      {{"high", 4, LogicWord::x(4)}, {"low", 4, LogicWord::x(4)}, {"word", 8, LogicWord::x(8)}},
+      {{"parts:comb", ProcessKind::combinational, "", "", {
+          {"word", Expr::constant(LogicWord::known(0, 8)), std::nullopt},
+          {"word", Expr::variable("high"), std::nullopt, {{7, 4}}},
+          {"word", Expr::variable("low"), std::nullopt, {{3, 0}}},
+      }, {}}}};
+  Engine parts_engine;
+  const auto parts = compile_ir(ir_part_selects, parts_engine);
+  parts_engine.write_now(parts.at("high"), LogicWord::known(0xa, 4));
+  parts_engine.write_now(parts.at("low"), LogicWord::known(0x5, 4));
+  parts_engine.run();
+  require(parts_engine.read(parts.at("word")) == LogicWord::known(0xa5, 8), "IR combinational part-select writes did not compose a word");
+  parts_engine.write_now(parts.at("low"), LogicWord::x(4));
+  parts_engine.run();
+  require(parts_engine.read(parts.at("word")) == LogicWord{0xa0, 0x0f, 0, 8}, "IR part-select write did not preserve four-state masks");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;
