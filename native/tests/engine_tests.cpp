@@ -299,6 +299,26 @@ int main() {
   source_mux_engine.write_now(source_mux.at("sel"), LogicWord::x(1));
   source_mux_engine.run();
   require(source_mux_engine.read(source_mux.at("y")) == LogicWord{0x8, 0x2, 0, 4}, "source conditional did not preserve four-state mux semantics");
+  const ModuleIR ir_alu_primitives{
+      "ir_alu_primitives",
+      {{"a", 8, LogicWord::x(8)}, {"b", 8, LogicWord::x(8)}, {"result", 8, LogicWord::x(8)}, {"less", 1, LogicWord::x(1)}, {"zero", 1, LogicWord::x(1)}},
+      {{"ir:alu", ProcessKind::combinational, "", "", {
+          {"result", Expr::binary(ExprKind::shift_right_logical, Expr::binary(ExprKind::subtract, Expr::variable("a"), Expr::variable("b")), Expr::constant(LogicWord::known(1, 8))), std::nullopt},
+          {"less", Expr::binary(ExprKind::less_than_unsigned, Expr::variable("a"), Expr::variable("b")), std::nullopt},
+          {"zero", Expr::unary(ExprKind::logical_not, Expr::variable("a")), std::nullopt},
+      }, {}}}};
+  Engine alu_engine;
+  const auto alu = compile_ir(ir_alu_primitives, alu_engine);
+  alu_engine.write_now(alu.at("a"), LogicWord::known(4, 8));
+  alu_engine.write_now(alu.at("b"), LogicWord::known(6, 8));
+  alu_engine.run();
+  require(alu_engine.read(alu.at("result")) == LogicWord::known(127, 8), "IR subtraction or logical shift did not wrap at signal width");
+  require(alu_engine.read(alu.at("less")) == LogicWord::known(1, 1), "IR unsigned comparison failed");
+  require(alu_engine.read(alu.at("zero")) == LogicWord::known(0, 1), "IR logical negation failed");
+  alu_engine.write_now(alu.at("a"), LogicWord::x(8));
+  alu_engine.run();
+  require(alu_engine.read(alu.at("result")) == LogicWord::x(8), "IR arithmetic did not propagate unknown input");
+  require(alu_engine.read(alu.at("less")) == LogicWord::x(1), "IR comparison did not propagate unknown input");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

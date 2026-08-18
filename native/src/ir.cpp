@@ -18,23 +18,43 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
     case ExprKind::constant: return expression.constant_value;
     case ExprKind::variable: return engine.read(signals.at(expression.variable_name));
     case ExprKind::bit_not: return bit_not(evaluate(*expression.left, signals, engine));
+    case ExprKind::logical_not: {
+      const auto operand = evaluate(*expression.left, signals, engine);
+      return operand.is_known() ? LogicWord::known(operand.as_u64() == 0, 1) : LogicWord::x(1);
+    }
     case ExprKind::bit_and: return bit_and(evaluate(*expression.left, signals, engine), evaluate(*expression.right, signals, engine));
     case ExprKind::bit_or: return bit_or(evaluate(*expression.left, signals, engine), evaluate(*expression.right, signals, engine));
     case ExprKind::bit_xor: return bit_xor(evaluate(*expression.left, signals, engine), evaluate(*expression.right, signals, engine));
-    case ExprKind::add: {
+    case ExprKind::add:
+    case ExprKind::subtract: {
       const auto left = evaluate(*expression.left, signals, engine);
       const auto right = evaluate(*expression.right, signals, engine);
-      if (left.width != right.width) throw std::invalid_argument("addition operands must have equal widths");
-      return left.is_known() && right.is_known() ? LogicWord::known(left.as_u64() + right.as_u64(), left.width) : LogicWord::x(left.width);
+      if (left.width != right.width) throw std::invalid_argument("arithmetic operands must have equal widths");
+      if (!left.is_known() || !right.is_known()) return LogicWord::x(left.width);
+      return LogicWord::known(expression.kind == ExprKind::add ? left.as_u64() + right.as_u64() : left.as_u64() - right.as_u64(), left.width);
+    }
+    case ExprKind::shift_left_logical:
+    case ExprKind::shift_right_logical: {
+      const auto left = evaluate(*expression.left, signals, engine);
+      const auto right = evaluate(*expression.right, signals, engine);
+      if (!left.is_known() || !right.is_known()) return LogicWord::x(left.width);
+      const auto amount = right.as_u64();
+      if (amount >= left.width) return LogicWord::known(0, left.width);
+      return LogicWord::known(expression.kind == ExprKind::shift_left_logical ? left.as_u64() << amount : left.as_u64() >> amount, left.width);
     }
     case ExprKind::equal:
-    case ExprKind::not_equal: {
+    case ExprKind::not_equal:
+    case ExprKind::less_than_unsigned:
+    case ExprKind::greater_equal_unsigned: {
       const auto left = evaluate(*expression.left, signals, engine);
       const auto right = evaluate(*expression.right, signals, engine);
       if (left.width != right.width) throw std::invalid_argument("comparison operands must have equal widths");
       if (!left.is_known() || !right.is_known()) return LogicWord::x(1);
-      const bool equals = left.as_u64() == right.as_u64();
-      return LogicWord::known(expression.kind == ExprKind::equal ? equals : !equals, 1);
+      const bool result = expression.kind == ExprKind::equal ? left.as_u64() == right.as_u64()
+          : expression.kind == ExprKind::not_equal ? left.as_u64() != right.as_u64()
+          : expression.kind == ExprKind::less_than_unsigned ? left.as_u64() < right.as_u64()
+          : left.as_u64() >= right.as_u64();
+      return LogicWord::known(result, 1);
     }
     case ExprKind::mux: {
       const auto select = evaluate(*expression.left, signals, engine);

@@ -12,7 +12,13 @@ namespace quiescesim {
 
 // QuiesceSim-owned, typed RTL IR. Parsers and bootstrap importers may emit this
 // representation, but the native runtime never executes a frontend AST.
-enum class ExprKind { constant, variable, bit_not, bit_and, bit_or, bit_xor, add, equal, not_equal, mux, slice, concat };
+enum class ExprKind {
+  constant, variable,
+  bit_not, logical_not, bit_and, bit_or, bit_xor,
+  add, subtract, shift_left_logical, shift_right_logical,
+  equal, not_equal, less_than_unsigned, greater_equal_unsigned,
+  mux, slice, concat
+};
 
 struct Expr {
   ExprKind kind;
