@@ -1,0 +1,11 @@
+[project]
+name = "quiescesim"
+version = "0.1.0"
+description = "Phase-0 guarded semantic clock-skipping RTL simulation demonstrator"
+requires-python = ">=3.11"
+
+[project.scripts]
+quiescesim = "quiescesim.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

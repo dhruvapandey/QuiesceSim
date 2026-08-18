@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# CMake and native build products
+native/build/
+native/build-sanitize/
+native/CMakeFiles/
+native/CMakeCache.txt
+native/Testing/
+*.o
+*.a
+*.dylib
+*.so
+
+# Local elaboration and generated simulator artifacts
+artifacts/
+work/
+*.vcd
+
+# Host/editor files
+.DS_Store
+.idea/
+.vscode/
