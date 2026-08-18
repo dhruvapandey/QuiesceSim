@@ -414,6 +414,28 @@ int main() {
   ir_memory_engine.write_now(ir_memory.at("address"), LogicWord::x(4));
   ir_memory_engine.run();
   require(ir_memory_engine.read(ir_memory.at("instruction")) == LogicWord::x(8), "IR memory read did not return X for unknown address");
+  const ModuleIR ir_memory_writer{
+      "ir_memory_writer",
+      {{"clk", 1, LogicWord::x(1)}, {"we", 1, LogicWord::x(1)}, {"address", 4, LogicWord::x(4)}, {"data", 8, LogicWord::x(8)}},
+      {{"ram:write", ProcessKind::posedge, "clk", "", {}, {}, {
+          {"ram", Expr::variable("address"), Expr::variable("data"), Expr::variable("we")},
+      }}}};
+  Engine ir_writer_engine;
+  const auto ram = ir_writer_engine.add_memory("top.ram", 8, 16, LogicWord::known(0, 8));
+  const auto ir_writer = compile_ir(ir_memory_writer, ir_writer_engine, {}, {{"ram", ram}});
+  ir_writer_engine.write_now(ir_writer.at("clk"), LogicWord::known(0, 1));
+  ir_writer_engine.write_now(ir_writer.at("we"), LogicWord::known(1, 1));
+  ir_writer_engine.write_now(ir_writer.at("address"), LogicWord::known(7, 4));
+  ir_writer_engine.write_now(ir_writer.at("data"), LogicWord::known(0xa5, 8));
+  ir_writer_engine.write_now(ir_writer.at("clk"), LogicWord::known(1, 1));
+  ir_writer_engine.run();
+  require(ir_writer_engine.read_memory(ram, 7) == LogicWord::known(0xa5, 8), "clocked IR memory write did not commit through NBA");
+  ir_writer_engine.schedule_at(1, [=](Engine& runtime) { runtime.write_now(ir_writer.at("clk"), LogicWord::known(0, 1)); });
+  ir_writer_engine.schedule_at(2, [=](Engine& runtime) { runtime.write_now(ir_writer.at("we"), LogicWord::known(0, 1)); });
+  ir_writer_engine.schedule_at(3, [=](Engine& runtime) { runtime.write_now(ir_writer.at("data"), LogicWord::known(0x3c, 8)); });
+  ir_writer_engine.schedule_at(4, [=](Engine& runtime) { runtime.write_now(ir_writer.at("clk"), LogicWord::known(1, 1)); });
+  ir_writer_engine.run();
+  require(ir_writer_engine.read_memory(ram, 7) == LogicWord::known(0xa5, 8), "disabled clocked IR memory write changed memory");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

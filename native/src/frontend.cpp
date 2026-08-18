@@ -150,10 +150,9 @@ ModuleIR RestrictedModule::to_ir() const {
   ModuleIR ir{.name = name_};
   for (const auto& [name, width] : widths_) ir.signals.push_back({name, width, LogicWord::x(width)});
   for (const auto& rule : rules_) {
-    ProcessIR process{.name = "always_ff:" + rule.target,
-                      .kind = rule.reset.empty() ? ProcessKind::posedge : ProcessKind::posedge_or_negedge_reset,
-                      .clock = rule.clock,
-                      .reset = rule.reset};
+    ProcessIR process{"always_ff:" + rule.target,
+                      rule.reset.empty() ? ProcessKind::posedge : ProcessKind::posedge_or_negedge_reset,
+                      rule.clock, rule.reset, {}, {}};
     process.assignments.push_back({rule.target, lower_expression(rule.update_expression, widths_.at(rule.target)), rule.enable_expression.empty() ? std::nullopt : std::optional<Expr>{lower_expression(rule.enable_expression, 1)}});
     if (!rule.reset.empty()) process.reset_assignments.push_back({rule.target, lower_expression(rule.reset_expression, widths_.at(rule.target)), std::nullopt});
     ir.processes.push_back(std::move(process));

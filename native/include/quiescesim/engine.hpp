@@ -80,6 +80,7 @@ class Engine {
   // Nonblocking update. Writes commit only after the active region empties.
   // FIFO ordering gives the SystemVerilog last-assignment-wins behavior.
   void write_nba(SignalId signal, LogicWord value);
+  void write_memory_nba(MemoryId memory, std::size_t address, LogicWord value);
   // Queue a nonblocking constant part-select update. The RHS is sampled now;
   // the slice is merged at NBA commit so multiple slice writes retain FIFO
   // ordering and overlapping writes resolve as last assignment wins.
@@ -99,6 +100,7 @@ class Engine {
     LogicWord value;
     std::optional<std::pair<std::uint8_t, std::uint8_t>> slice;
   };
+  struct MemoryNbaWrite { MemoryId memory; std::size_t address; LogicWord value; };
   struct FutureEvent { std::uint64_t time; std::uint64_t order; TimedCallback callback; };
   struct FutureEarlier {
     bool operator()(const FutureEvent& lhs, const FutureEvent& rhs) const {
@@ -117,6 +119,7 @@ class Engine {
   std::unordered_map<MemoryId, std::vector<ProcessId>> memory_sensitivity_;
   std::queue<ProcessId> active_;
   std::vector<NbaWrite> nba_;
+  std::vector<MemoryNbaWrite> memory_nba_;
   std::priority_queue<FutureEvent, std::vector<FutureEvent>, FutureEarlier> future_;
   std::vector<WaveChange> waves_;
   std::uint64_t skipped_guarded_evaluations_{0};

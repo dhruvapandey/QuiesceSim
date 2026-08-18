@@ -58,6 +58,18 @@ struct AssignmentIR {
         condition(std::move(condition_in)), target_slice(std::move(target_slice_in)) {}
 };
 
+struct MemoryWriteIR {
+  std::string memory;
+  Expr address;
+  Expr expression;
+  std::optional<Expr> condition;
+
+  MemoryWriteIR(std::string memory_in, Expr address_in, Expr expression_in,
+                std::optional<Expr> condition_in = std::nullopt)
+      : memory(std::move(memory_in)), address(std::move(address_in)),
+        expression(std::move(expression_in)), condition(std::move(condition_in)) {}
+};
+
 enum class ProcessKind { combinational, posedge, posedge_or_negedge_reset };
 
 struct ProcessIR {
@@ -67,6 +79,15 @@ struct ProcessIR {
   std::string reset;
   std::vector<AssignmentIR> assignments;
   std::vector<AssignmentIR> reset_assignments;
+  std::vector<MemoryWriteIR> memory_writes;
+
+  ProcessIR(std::string name_in, ProcessKind kind_in, std::string clock_in,
+            std::string reset_in, std::vector<AssignmentIR> assignments_in,
+            std::vector<AssignmentIR> reset_assignments_in,
+            std::vector<MemoryWriteIR> memory_writes_in = {})
+      : name(std::move(name_in)), kind(kind_in), clock(std::move(clock_in)),
+        reset(std::move(reset_in)), assignments(std::move(assignments_in)),
+        reset_assignments(std::move(reset_assignments_in)), memory_writes(std::move(memory_writes_in)) {}
 };
 
 struct SignalIR { std::string name; std::uint8_t width; LogicWord initial; };

@@ -169,6 +169,14 @@ std::unordered_map<std::string, SignalId> compile_ir(
         if (assignment.condition) collect_dependencies(*assignment.condition, signals, unique_sensitivity);
         if (assignment.condition) collect_memory_dependencies(*assignment.condition, memory_bindings, unique_memory_sensitivity);
       }
+      for (const auto& write : process.memory_writes) {
+        collect_dependencies(write.address, signals, unique_sensitivity);
+        collect_dependencies(write.expression, signals, unique_sensitivity);
+        collect_memory_dependencies(write.address, memory_bindings, unique_memory_sensitivity);
+        collect_memory_dependencies(write.expression, memory_bindings, unique_memory_sensitivity);
+        if (write.condition) collect_dependencies(*write.condition, signals, unique_sensitivity);
+        if (write.condition) collect_memory_dependencies(*write.condition, memory_bindings, unique_memory_sensitivity);
+      }
       std::vector<SignalId> sensitivity(unique_sensitivity.begin(), unique_sensitivity.end());
       std::vector<MemoryId> memory_sensitivity(unique_memory_sensitivity.begin(), unique_memory_sensitivity.end());
       const auto id = engine.add_process(process.name, sensitivity, memory_sensitivity, [signals, memory_bindings, process](Engine& runtime) {
@@ -182,6 +190,14 @@ std::unordered_map<std::string, SignalId> compile_ir(
           } else {
             runtime.write_now(target, value);
           }
+        }
+        for (const auto& write : process.memory_writes) {
+          if (!condition_true(write.condition, signals, memory_bindings, runtime)) continue;
+          const auto address = evaluate(write.address, signals, memory_bindings, runtime);
+          if (!address.is_known()) throw std::invalid_argument("IR memory write address is unknown");
+          const auto memory = memory_bindings.at(write.memory);
+          if (address.as_u64() >= runtime.memory_depth(memory)) throw std::invalid_argument("IR memory write address is out of range");
+          runtime.write_memory_now(memory, address.as_u64(), evaluate(write.expression, signals, memory_bindings, runtime));
         }
       });
       engine.schedule_active(id);
@@ -219,6 +235,16 @@ std::unordered_map<std::string, SignalId> compile_ir(
           // but record only the definite optimization opportunity.
           const auto condition = evaluate(*assignment.condition, signals, memory_bindings, runtime);
           if (condition.is_known() && condition.as_u64() == 0) runtime.record_guarded_skip();
+        }
+      }
+      if (!(has_reset && current_reset.is_known() && current_reset.as_u64() == 0)) {
+        for (const auto& write : process.memory_writes) {
+          if (!condition_true(write.condition, signals, memory_bindings, runtime)) continue;
+          const auto address = evaluate(write.address, signals, memory_bindings, runtime);
+          if (!address.is_known()) throw std::invalid_argument("IR memory write address is unknown");
+          const auto memory = memory_bindings.at(write.memory);
+          if (address.as_u64() >= runtime.memory_depth(memory)) throw std::invalid_argument("IR memory write address is out of range");
+          runtime.write_memory_nba(memory, address.as_u64(), evaluate(write.expression, signals, memory_bindings, runtime));
         }
       }
     });

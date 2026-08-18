@@ -145,6 +145,7 @@ void Engine::commit_memory_now(MemoryId memory, std::size_t address, LogicWord v
 }
 void Engine::write_memory_now(MemoryId memory, std::size_t address, LogicWord value) { commit_memory_now(memory, address, value); }
 void Engine::write_nba(SignalId signal, LogicWord value) { nba_.push_back({signal, value, std::nullopt}); }
+void Engine::write_memory_nba(MemoryId memory, std::size_t address, LogicWord value) { memory_nba_.push_back({memory, address, value}); }
 void Engine::write_nba_slice(SignalId signal, LogicWord value, std::uint8_t msb, std::uint8_t lsb) {
   nba_.push_back({signal, value, std::pair{msb, lsb}});
 }
@@ -169,15 +170,17 @@ void Engine::write_vcd(std::ostream& output) const {
 }
 
 void Engine::run() {
-  while (!active_.empty() || !nba_.empty() || !future_.empty()) {
+  while (!active_.empty() || !nba_.empty() || !memory_nba_.empty() || !future_.empty()) {
     while (!active_.empty()) {
       const auto process = active_.front();
       active_.pop();
       processes_.at(process).callback(*this);
     }
-    if (!nba_.empty()) {
+    if (!nba_.empty() || !memory_nba_.empty()) {
       auto pending = std::move(nba_);
       nba_.clear();
+      auto pending_memory = std::move(memory_nba_);
+      memory_nba_.clear();
       for (const auto& write : pending) {
         if (write.slice) {
           const auto [msb, lsb] = *write.slice;
@@ -186,6 +189,7 @@ void Engine::run() {
           commit_now(write.signal, write.value);
         }
       }
+      for (const auto& write : pending_memory) commit_memory_now(write.memory, write.address, write.value);
       continue;
     }
     if (!future_.empty()) {
