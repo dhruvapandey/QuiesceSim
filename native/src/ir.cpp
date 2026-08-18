@@ -176,9 +176,15 @@ std::unordered_map<std::string, SignalId> compile_ir(
       if (!posedge && !negedge_reset) return;
       const auto& assignments = has_reset && current_reset.is_known() && current_reset.as_u64() == 0 ? process.reset_assignments : process.assignments;
       for (const auto& assignment : assignments) {
-        if (assignment.target_slice) throw std::invalid_argument("clocked IR part-select assignment is not implemented yet");
         if (condition_true(assignment.condition, signals, runtime)) {
-          runtime.write_nba(signals.at(assignment.target), evaluate(assignment.expression, signals, runtime));
+          const auto target = signals.at(assignment.target);
+          const auto value = evaluate(assignment.expression, signals, runtime);
+          if (assignment.target_slice) {
+            const auto [msb, lsb] = *assignment.target_slice;
+            runtime.write_nba_slice(target, value, msb, lsb);
+          } else {
+            runtime.write_nba(target, value);
+          }
         } else if (assignment.condition) {
           // A known-false clock-enable is a proven no-op for this state
           // transition. Preserve normal SystemVerilog `if` behavior for X/Z,

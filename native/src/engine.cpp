@@ -25,6 +25,17 @@ void require_same_width(const LogicWord& left, const LogicWord& right) {
 }
 
 std::uint64_t unknown_mask(const LogicWord& value) { return value.x_mask | value.z_mask; }
+
+LogicWord replace_slice(LogicWord original, LogicWord replacement, std::uint8_t msb, std::uint8_t lsb) {
+  if (lsb > msb || msb >= original.width) throw std::invalid_argument("NBA part-select range is invalid");
+  const auto width = static_cast<std::uint8_t>(msb - lsb + 1);
+  if (replacement.width != width) throw std::invalid_argument("NBA part-select width mismatch");
+  const auto field_mask = mask_for(width);
+  const auto positioned_mask = field_mask << lsb;
+  return {(original.bits & ~positioned_mask) | ((replacement.bits & field_mask) << lsb),
+          (original.x_mask & ~positioned_mask) | ((replacement.x_mask & field_mask) << lsb),
+          (original.z_mask & ~positioned_mask) | ((replacement.z_mask & field_mask) << lsb), original.width};
+}
 }
 
 LogicWord bit_not(LogicWord value) {
@@ -109,7 +120,10 @@ void Engine::commit_now(SignalId signal, LogicWord value) {
   wake_sensitive(signal);
 }
 void Engine::write_now(SignalId signal, LogicWord value) { commit_now(signal, value); }
-void Engine::write_nba(SignalId signal, LogicWord value) { nba_.push_back({signal, value}); }
+void Engine::write_nba(SignalId signal, LogicWord value) { nba_.push_back({signal, value, std::nullopt}); }
+void Engine::write_nba_slice(SignalId signal, LogicWord value, std::uint8_t msb, std::uint8_t lsb) {
+  nba_.push_back({signal, value, std::pair{msb, lsb}});
+}
 void Engine::record_guarded_skip() { ++skipped_guarded_evaluations_; }
 
 void Engine::write_vcd(std::ostream& output) const {
@@ -140,7 +154,14 @@ void Engine::run() {
     if (!nba_.empty()) {
       auto pending = std::move(nba_);
       nba_.clear();
-      for (const auto& write : pending) commit_now(write.signal, write.value);
+      for (const auto& write : pending) {
+        if (write.slice) {
+          const auto [msb, lsb] = *write.slice;
+          commit_now(write.signal, replace_slice(read(write.signal), write.value, msb, lsb));
+        } else {
+          commit_now(write.signal, write.value);
+        }
+      }
       continue;
     }
     if (!future_.empty()) {

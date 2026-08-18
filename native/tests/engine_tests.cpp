@@ -363,6 +363,22 @@ int main() {
   parts_engine.write_now(parts.at("low"), LogicWord::x(4));
   parts_engine.run();
   require(parts_engine.read(parts.at("word")) == LogicWord{0xa0, 0x0f, 0, 8}, "IR part-select write did not preserve four-state masks");
+  const ModuleIR ir_clocked_part_selects{
+      "ir_clocked_part_selects",
+      {{"clk", 1, LogicWord::x(1)}, {"high", 4, LogicWord::x(4)}, {"low", 4, LogicWord::x(4)}, {"q", 8, LogicWord::known(0, 8)}},
+      {{"parts:ff", ProcessKind::posedge, "clk", "", {
+          {"q", Expr::variable("high"), std::nullopt, {{7, 4}}},
+          {"q", Expr::variable("low"), std::nullopt, {{3, 0}}},
+          {"q", Expr::constant(LogicWord::known(0xb, 4)), std::nullopt, {{7, 4}}},
+      }, {}}}};
+  Engine clocked_parts_engine;
+  const auto clocked_parts = compile_ir(ir_clocked_part_selects, clocked_parts_engine);
+  clocked_parts_engine.write_now(clocked_parts.at("clk"), LogicWord::known(0, 1));
+  clocked_parts_engine.write_now(clocked_parts.at("high"), LogicWord::known(0xa, 4));
+  clocked_parts_engine.write_now(clocked_parts.at("low"), LogicWord::known(0x5, 4));
+  clocked_parts_engine.write_now(clocked_parts.at("clk"), LogicWord::known(1, 1));
+  clocked_parts_engine.run();
+  require(clocked_parts_engine.read(clocked_parts.at("q")) == LogicWord::known(0xb5, 8), "clocked part-select NBA writes did not merge or preserve last-write-wins ordering");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

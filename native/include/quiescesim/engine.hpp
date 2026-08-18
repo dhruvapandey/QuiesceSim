@@ -3,9 +3,11 @@
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
+#include <optional>
 #include <queue>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace quiescesim {
@@ -70,6 +72,10 @@ class Engine {
   // Nonblocking update. Writes commit only after the active region empties.
   // FIFO ordering gives the SystemVerilog last-assignment-wins behavior.
   void write_nba(SignalId signal, LogicWord value);
+  // Queue a nonblocking constant part-select update. The RHS is sampled now;
+  // the slice is merged at NBA commit so multiple slice writes retain FIFO
+  // ordering and overlapping writes resolve as last assignment wins.
+  void write_nba_slice(SignalId signal, LogicWord value, std::uint8_t msb, std::uint8_t lsb);
   // Used only after a semantic guard has established that a clocked process
   // cannot alter state at this edge. It is instrumentation today; later it is
   // the accounting source for region-level quiescence acceleration.
@@ -79,7 +85,11 @@ class Engine {
  private:
   struct Signal { std::string name; LogicWord initial; LogicWord value; };
   struct Proc { std::string name; Process callback; };
-  struct NbaWrite { SignalId signal; LogicWord value; };
+  struct NbaWrite {
+    SignalId signal;
+    LogicWord value;
+    std::optional<std::pair<std::uint8_t, std::uint8_t>> slice;
+  };
   struct FutureEvent { std::uint64_t time; std::uint64_t order; TimedCallback callback; };
   struct FutureEarlier {
     bool operator()(const FutureEvent& lhs, const FutureEvent& rhs) const {
