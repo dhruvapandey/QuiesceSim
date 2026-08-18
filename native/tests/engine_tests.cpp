@@ -287,6 +287,18 @@ int main() {
   mux_engine.write_now(mux_signals.at("sel"), LogicWord::known(1, 1));
   mux_engine.run();
   require(mux_engine.read(mux_signals.at("y")) == LogicWord::known(0xa, 4), "IR mux did not select true branch");
+  const std::string source_mux_rtl = R"(
+    module source_mux(input logic sel, input logic [3:0] a, input logic [3:0] b, output logic [3:0] y);
+      assign y = sel ? a : b;
+    endmodule
+  )";
+  Engine source_mux_engine;
+  const auto source_mux = RestrictedModule::parse(source_mux_rtl).instantiate(source_mux_engine);
+  source_mux_engine.write_now(source_mux.at("a"), LogicWord::known(0xa, 4));
+  source_mux_engine.write_now(source_mux.at("b"), LogicWord::known(0x8, 4));
+  source_mux_engine.write_now(source_mux.at("sel"), LogicWord::x(1));
+  source_mux_engine.run();
+  require(source_mux_engine.read(source_mux.at("y")) == LogicWord{0x8, 0x2, 0, 4}, "source conditional did not preserve four-state mux semantics");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

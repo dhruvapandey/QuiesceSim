@@ -37,6 +37,19 @@ Expr lower_expression(const std::string& expression, std::uint8_t width) {
   if (expr == "'0" || expr == "0" || expr == "1'b0") return Expr::constant(LogicWord::known(0, width));
   if (expr == "1" || expr == "1'b1") return Expr::constant(LogicWord::known(1, width));
   if (expr.starts_with("0x")) return Expr::constant(LogicWord::known(std::stoull(expr, nullptr, 16), width));
+  // This deliberately supports one flat conditional expression only. Do not
+  // guess at precedence for nested conditionals: unsupported syntax must fail
+  // at build time until the full parser owns those grammar rules.
+  const auto question = expr.find('?');
+  if (question != std::string::npos) {
+    const auto colon = expr.find(':', question + 1);
+    if (colon == std::string::npos || expr.find('?', question + 1) != std::string::npos || expr.find(':', colon + 1) != std::string::npos) {
+      throw std::invalid_argument("unsupported nested or malformed conditional expression: " + expr);
+    }
+    return Expr::mux(lower_expression(expr.substr(0, question), 1),
+                     lower_expression(expr.substr(question + 1, colon - question - 1), width),
+                     lower_expression(expr.substr(colon + 1), width));
+  }
   if (expr.starts_with("~")) return Expr::unary(ExprKind::bit_not, lower_expression(expr.substr(1), width));
   for (const auto op : {'|', '^', '&'}) {
     const auto index = expr.find(op);
