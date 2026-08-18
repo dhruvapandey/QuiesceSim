@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from quiescesim.elaborate import fingerprint_file, import_verilator_json, lower_resolved_module
+from quiescesim.elaborate import fingerprint_file, import_verilator_json, lower_resolved_module, lower_resolved_xml_module
 
 
 class ElaborateImportTests(unittest.TestCase):
@@ -48,3 +48,20 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertEqual(lowered.processes[0]["keyword"], "always_ff")
         self.assertEqual(lowered.processes[0]["hierarchy_path"], ["enabled_branch", "ALWAYS"])
         self.assertEqual(lowered.processes[0]["statement_kinds"]["ASSIGNDLY"], 1)
+
+    def test_xml_lowering_retains_resolved_packed_widths(self):
+        fixture = """<verilator_xml><netlist><typetable>
+          <basicdtype id=\"1\" name=\"logic\"/>
+          <basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/>
+        </typetable><module name=\"counter\">
+          <var name=\"clk\" dtype_id=\"1\" dir=\"input\" vartype=\"logic\"/>
+          <var name=\"q\" dtype_id=\"8\" dir=\"output\" vartype=\"logic\"/>
+          <always loc=\"fixture,1,1\"><assign><const name=\"8'h0\"/></assign></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "counter.xml"
+            path.write_text(fixture)
+            lowered = lower_resolved_xml_module(path, "counter")
+        self.assertEqual(lowered.variables[0]["width"], 1)
+        self.assertEqual(lowered.variables[1]["width"], 8)
+        self.assertEqual(lowered.processes[0]["statement_kinds"]["ASSIGN"], 1)

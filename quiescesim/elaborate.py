@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import xml.etree.ElementTree as ET
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,63 @@ def lower_resolved_module(json_path: Path, module_name: str) -> ResolvedModuleIR
             })
         else:
             visit(statement, ())
+    return ResolvedModuleIR(module_name, tuple(variables), tuple(processes))
+
+
+def _xml_tree(node: ET.Element) -> dict:
+    """Preserve a resolved XML statement tree in a frontend-neutral shape."""
+    return {
+        "type": node.tag.upper(),
+        **({"name": node.attrib["name"]} if "name" in node.attrib else {}),
+        **({"attributes": dict(sorted(node.attrib.items()))} if node.attrib else {}),
+        "children": [_xml_tree(child) for child in node],
+    }
+
+
+def lower_resolved_xml_module(xml_path: Path, module_name: str) -> ResolvedModuleIR:
+    """Import a width-aware, elaborated module from Verilator XML.
+
+    JSON is useful for broad design inventory, but its dtype references are
+    opaque. XML exposes the resolved type table, allowing QuiesceSim to retain
+    exact packed widths as it lowers parameterized/generate-resolved modules.
+    This remains a bootstrap frontend only; native runtime consumes neither
+    Verilator JSON nor XML.
+    """
+    root = ET.parse(xml_path).getroot()
+    widths: dict[str, int] = {}
+    for dtype in root.findall(".//typetable/*"):
+        dtype_id = dtype.attrib.get("id")
+        if dtype_id is None:
+            continue
+        left, right = dtype.attrib.get("left"), dtype.attrib.get("right")
+        if left is not None and right is not None:
+            widths[dtype_id] = abs(int(left) - int(right)) + 1
+        elif dtype.tag == "basicdtype":
+            widths[dtype_id] = 1
+    module = next((item for item in root.findall(".//module") if item.attrib.get("name") == module_name), None)
+    if module is None:
+        raise ValueError(f"resolved XML module not found: {module_name}")
+    variables = []
+    for variable in module.findall("var"):
+        dtype_id = variable.attrib.get("dtype_id", "")
+        variables.append({
+            "name": variable.attrib["name"],
+            "direction": variable.attrib.get("dir", "NONE").upper(),
+            "dtype_name": variable.attrib.get("vartype", ""),
+            "width": widths.get(dtype_id),
+            "source": variable.attrib.get("loc", ""),
+        })
+    processes = []
+    for always in module.findall(".//always"):
+        body = [_xml_tree(child) for child in always]
+        counts: Counter[str] = Counter()
+        _count_nodes(body, counts)
+        processes.append({
+            "keyword": "always",
+            "source": always.attrib.get("loc", ""),
+            "statement_kinds": dict(sorted(counts.items())),
+            "resolved_body": body,
+        })
     return ResolvedModuleIR(module_name, tuple(variables), tuple(processes))
 
 
