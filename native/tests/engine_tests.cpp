@@ -319,6 +319,33 @@ int main() {
   alu_engine.run();
   require(alu_engine.read(alu.at("result")) == LogicWord::x(8), "IR arithmetic did not propagate unknown input");
   require(alu_engine.read(alu.at("less")) == LogicWord::x(1), "IR comparison did not propagate unknown input");
+  const ModuleIR hierarchy_register{
+      "hierarchy_register",
+      {{"clk", 1, LogicWord::x(1)}, {"rst_n", 1, LogicWord::x(1)}, {"d", 8, LogicWord::x(8)}, {"q", 8, LogicWord::x(8)}},
+      {{"register:ff", ProcessKind::posedge_or_negedge_reset, "clk", "rst_n", {{"q", Expr::variable("d"), std::nullopt}}, {{"q", Expr::constant(LogicWord::known(0, 8)), std::nullopt}}}}};
+  const ModuleIR hierarchy_observer{
+      "hierarchy_observer",
+      {{"i", 8, LogicWord::x(8)}, {"o", 8, LogicWord::x(8)}},
+      {{"observer:comb", ProcessKind::combinational, "", "", {{"o", Expr::binary(ExprKind::bit_xor, Expr::variable("i"), Expr::constant(LogicWord::known(0xff, 8))), std::nullopt}}, {}}}};
+  Engine hierarchy_engine;
+  const auto top_clk = hierarchy_engine.add_signal("top.clk", LogicWord::x(1));
+  const auto top_rst_n = hierarchy_engine.add_signal("top.rst_n", LogicWord::x(1));
+  const auto top_d = hierarchy_engine.add_signal("top.d", LogicWord::x(8));
+  const auto hierarchy_shared_q = hierarchy_engine.add_signal("top.shared_q", LogicWord::x(8));
+  const auto register_instance = compile_ir(hierarchy_register, hierarchy_engine, {{"clk", top_clk}, {"rst_n", top_rst_n}, {"d", top_d}, {"q", hierarchy_shared_q}});
+  const auto observer_instance = compile_ir(hierarchy_observer, hierarchy_engine, {{"i", hierarchy_shared_q}});
+  hierarchy_engine.write_now(top_clk, LogicWord::known(0, 1));
+  hierarchy_engine.write_now(top_rst_n, LogicWord::known(0, 1));
+  hierarchy_engine.write_now(top_clk, LogicWord::known(1, 1));
+  hierarchy_engine.run();
+  require(hierarchy_engine.read(hierarchy_shared_q) == LogicWord::known(0, 8), "hierarchy-bound reset did not update shared net");
+  hierarchy_engine.schedule_at(1, [=](Engine& runtime) { runtime.write_now(top_clk, LogicWord::known(0, 1)); });
+  hierarchy_engine.schedule_at(2, [=](Engine& runtime) { runtime.write_now(top_rst_n, LogicWord::known(1, 1)); });
+  hierarchy_engine.schedule_at(3, [=](Engine& runtime) { runtime.write_now(top_d, LogicWord::known(0x3c, 8)); });
+  hierarchy_engine.schedule_at(4, [=](Engine& runtime) { runtime.write_now(top_clk, LogicWord::known(1, 1)); });
+  hierarchy_engine.run();
+  require(hierarchy_engine.read(register_instance.at("q")) == LogicWord::known(0x3c, 8), "hierarchy register output did not update");
+  require(hierarchy_engine.read(observer_instance.at("o")) == LogicWord::known(0xc3, 8), "cross-instance dependency did not wake observer");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

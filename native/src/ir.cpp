@@ -106,10 +106,23 @@ bool condition_true(const std::optional<Expr>& condition, const std::unordered_m
 }
 
 std::unordered_map<std::string, SignalId> compile_ir(const ModuleIR& module, Engine& engine) {
+  return compile_ir(module, engine, {});
+}
+
+std::unordered_map<std::string, SignalId> compile_ir(
+    const ModuleIR& module, Engine& engine,
+    const std::unordered_map<std::string, SignalId>& bindings) {
   std::unordered_map<std::string, SignalId> signals;
   for (const auto& signal : module.signals) {
     if (signal.width != signal.initial.width) throw std::invalid_argument("IR signal initial value width mismatch: " + signal.name);
-    signals.emplace(signal.name, engine.add_signal(signal.name, signal.initial));
+    if (const auto binding = bindings.find(signal.name); binding != bindings.end()) {
+      if (engine.read(binding->second).width != signal.width) {
+        throw std::invalid_argument("IR hierarchy binding width mismatch: " + signal.name);
+      }
+      signals.emplace(signal.name, binding->second);
+    } else {
+      signals.emplace(signal.name, engine.add_signal(module.name + "." + signal.name, signal.initial));
+    }
   }
   for (const auto& process : module.processes) {
     if (process.kind == ProcessKind::combinational) {

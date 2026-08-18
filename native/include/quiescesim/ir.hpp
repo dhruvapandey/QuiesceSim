@@ -64,5 +64,12 @@ struct ModuleIR { std::string name; std::vector<SignalIR> signals; std::vector<P
 // Compile IR into exact active/NBA process callbacks. Returned IDs are the
 // stable bridge used by testbench drivers, waves, and later hierarchy lowering.
 std::unordered_map<std::string, SignalId> compile_ir(const ModuleIR& module, Engine& engine);
+// Compile one hierarchy instance. A bound local signal reuses an existing
+// parent signal ID; every unbound local signal is allocated by this instance.
+// This is the first hierarchy primitive: instances share event scheduling and
+// four-state net values rather than exchanging copied snapshots.
+std::unordered_map<std::string, SignalId> compile_ir(
+    const ModuleIR& module, Engine& engine,
+    const std::unordered_map<std::string, SignalId>& bindings);
 
 }  // namespace quiescesim
