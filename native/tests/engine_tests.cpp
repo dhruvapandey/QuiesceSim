@@ -379,6 +379,22 @@ int main() {
   clocked_parts_engine.write_now(clocked_parts.at("clk"), LogicWord::known(1, 1));
   clocked_parts_engine.run();
   require(clocked_parts_engine.read(clocked_parts.at("q")) == LogicWord::known(0xb5, 8), "clocked part-select NBA writes did not merge or preserve last-write-wins ordering");
+  Engine memory_engine;
+  const auto memory_address = memory_engine.add_signal("memory.address", LogicWord::known(0, 4));
+  const auto memory_data = memory_engine.add_signal("memory.data", LogicWord::x(8));
+  const auto scratch = memory_engine.add_memory("memory.scratch", 8, 16, LogicWord::known(0, 8));
+  const auto memory_read = memory_engine.add_process("memory:read", {memory_address}, {scratch}, [=](Engine& runtime) {
+    runtime.write_now(memory_data, runtime.read_memory(scratch, runtime.read(memory_address).as_u64()));
+  });
+  memory_engine.schedule_active(memory_read);
+  memory_engine.run();
+  require(memory_engine.read(memory_data) == LogicWord::known(0, 8), "memory read process did not initialize");
+  memory_engine.write_memory_now(scratch, 0, LogicWord::known(0x5a, 8));
+  memory_engine.run();
+  require(memory_engine.read(memory_data) == LogicWord::known(0x5a, 8), "memory write did not wake dependent process");
+  memory_engine.write_now(memory_address, LogicWord::known(1, 4));
+  memory_engine.run();
+  require(memory_engine.read(memory_data) == LogicWord::known(0, 8), "memory read did not wake on address change");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

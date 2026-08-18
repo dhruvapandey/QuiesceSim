@@ -95,11 +95,22 @@ SignalId Engine::add_signal(std::string name, LogicWord initial) {
   signals_.push_back({std::move(name), initial, initial});
   return static_cast<SignalId>(signals_.size() - 1);
 }
+MemoryId Engine::add_memory(std::string name, std::uint8_t element_width, std::size_t depth, LogicWord initial) {
+  if (depth == 0) throw std::invalid_argument("memory depth must be nonzero");
+  if (initial.width != element_width) throw std::invalid_argument("memory initial value width mismatch");
+  memories_.push_back({std::move(name), element_width, std::vector<LogicWord>(depth, initial)});
+  return static_cast<MemoryId>(memories_.size() - 1);
+}
 
 ProcessId Engine::add_process(std::string name, std::vector<SignalId> sensitivity, Process process) {
+  return add_process(std::move(name), std::move(sensitivity), {}, std::move(process));
+}
+ProcessId Engine::add_process(std::string name, std::vector<SignalId> signal_sensitivity,
+                              std::vector<MemoryId> memory_sensitivity, Process process) {
   const auto id = static_cast<ProcessId>(processes_.size());
   processes_.push_back({std::move(name), std::move(process)});
-  for (const auto signal : sensitivity) sensitivity_[signal].push_back(id);
+  for (const auto signal : signal_sensitivity) sensitivity_[signal].push_back(id);
+  for (const auto memory : memory_sensitivity) memory_sensitivity_[memory].push_back(id);
   return id;
 }
 
@@ -109,8 +120,10 @@ void Engine::schedule_at(std::uint64_t time, TimedCallback callback) {
   future_.push({time, next_order_++, std::move(callback)});
 }
 LogicWord Engine::read(SignalId signal) const { return signals_.at(signal).value; }
+LogicWord Engine::read_memory(MemoryId memory, std::size_t address) const { return memories_.at(memory).elements.at(address); }
 const std::string& Engine::signal_name(SignalId signal) const { return signals_.at(signal).name; }
 void Engine::wake_sensitive(SignalId signal) { for (const auto process : sensitivity_[signal]) active_.push(process); }
+void Engine::wake_memory_sensitive(MemoryId memory) { for (const auto process : memory_sensitivity_[memory]) active_.push(process); }
 void Engine::commit_now(SignalId signal, LogicWord value) {
   auto& target = signals_.at(signal);
   if (target.value == value) return;
@@ -120,6 +133,15 @@ void Engine::commit_now(SignalId signal, LogicWord value) {
   wake_sensitive(signal);
 }
 void Engine::write_now(SignalId signal, LogicWord value) { commit_now(signal, value); }
+void Engine::commit_memory_now(MemoryId memory, std::size_t address, LogicWord value) {
+  auto& target = memories_.at(memory);
+  if (value.width != target.element_width) throw std::invalid_argument("memory write width mismatch");
+  auto& element = target.elements.at(address);
+  if (element == value) return;
+  element = value;
+  wake_memory_sensitive(memory);
+}
+void Engine::write_memory_now(MemoryId memory, std::size_t address, LogicWord value) { commit_memory_now(memory, address, value); }
 void Engine::write_nba(SignalId signal, LogicWord value) { nba_.push_back({signal, value, std::nullopt}); }
 void Engine::write_nba_slice(SignalId signal, LogicWord value, std::uint8_t msb, std::uint8_t lsb) {
   nba_.push_back({signal, value, std::pair{msb, lsb}});

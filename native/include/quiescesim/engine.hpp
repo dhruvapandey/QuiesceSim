@@ -13,6 +13,7 @@
 namespace quiescesim {
 
 using SignalId = std::uint32_t;
+using MemoryId = std::uint32_t;
 using ProcessId = std::uint32_t;
 
 // Packed four-state scalar/word. An X or Z bit is represented by a set bit in
@@ -52,11 +53,15 @@ class Engine {
   using TimedCallback = std::function<void(Engine&)>;
 
   SignalId add_signal(std::string name, LogicWord initial);
+  MemoryId add_memory(std::string name, std::uint8_t element_width, std::size_t depth, LogicWord initial);
   ProcessId add_process(std::string name, std::vector<SignalId> sensitivity, Process process);
+  ProcessId add_process(std::string name, std::vector<SignalId> signal_sensitivity,
+                        std::vector<MemoryId> memory_sensitivity, Process process);
   void schedule_active(ProcessId process);
   void schedule_at(std::uint64_t time, TimedCallback callback);
 
   [[nodiscard]] LogicWord read(SignalId signal) const;
+  [[nodiscard]] LogicWord read_memory(MemoryId memory, std::size_t address) const;
   [[nodiscard]] const std::string& signal_name(SignalId signal) const;
   [[nodiscard]] std::uint64_t now() const { return time_; }
   [[nodiscard]] const std::vector<WaveChange>& waves() const { return waves_; }
@@ -69,6 +74,7 @@ class Engine {
   // Immediate update, used for combinational/process inputs. Any value change
   // wakes sensitive processes in the active queue.
   void write_now(SignalId signal, LogicWord value);
+  void write_memory_now(MemoryId memory, std::size_t address, LogicWord value);
   // Nonblocking update. Writes commit only after the active region empties.
   // FIFO ordering gives the SystemVerilog last-assignment-wins behavior.
   void write_nba(SignalId signal, LogicWord value);
@@ -84,6 +90,7 @@ class Engine {
 
  private:
   struct Signal { std::string name; LogicWord initial; LogicWord value; };
+  struct Memory { std::string name; std::uint8_t element_width; std::vector<LogicWord> elements; };
   struct Proc { std::string name; Process callback; };
   struct NbaWrite {
     SignalId signal;
@@ -98,10 +105,14 @@ class Engine {
   };
 
   void commit_now(SignalId signal, LogicWord value);
+  void commit_memory_now(MemoryId memory, std::size_t address, LogicWord value);
   void wake_sensitive(SignalId signal);
+  void wake_memory_sensitive(MemoryId memory);
   std::vector<Signal> signals_;
+  std::vector<Memory> memories_;
   std::vector<Proc> processes_;
   std::unordered_map<SignalId, std::vector<ProcessId>> sensitivity_;
+  std::unordered_map<MemoryId, std::vector<ProcessId>> memory_sensitivity_;
   std::queue<ProcessId> active_;
   std::vector<NbaWrite> nba_;
   std::priority_queue<FutureEvent, std::vector<FutureEvent>, FutureEarlier> future_;
