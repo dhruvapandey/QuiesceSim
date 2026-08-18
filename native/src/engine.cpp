@@ -121,6 +121,8 @@ void Engine::schedule_at(std::uint64_t time, TimedCallback callback) {
 }
 LogicWord Engine::read(SignalId signal) const { return signals_.at(signal).value; }
 LogicWord Engine::read_memory(MemoryId memory, std::size_t address) const { return memories_.at(memory).elements.at(address); }
+std::uint8_t Engine::memory_element_width(MemoryId memory) const { return memories_.at(memory).element_width; }
+std::size_t Engine::memory_depth(MemoryId memory) const { return memories_.at(memory).elements.size(); }
 const std::string& Engine::signal_name(SignalId signal) const { return signals_.at(signal).name; }
 void Engine::wake_sensitive(SignalId signal) { for (const auto process : sensitivity_[signal]) active_.push(process); }
 void Engine::wake_memory_sensitive(MemoryId memory) { for (const auto process : memory_sensitivity_[memory]) active_.push(process); }

@@ -395,6 +395,25 @@ int main() {
   memory_engine.write_now(memory_address, LogicWord::known(1, 4));
   memory_engine.run();
   require(memory_engine.read(memory_data) == LogicWord::known(0, 8), "memory read did not wake on address change");
+  const ModuleIR ir_rom_reader{
+      "ir_rom_reader",
+      {{"address", 4, LogicWord::x(4)}, {"instruction", 8, LogicWord::x(8)}},
+      {{"rom:read", ProcessKind::combinational, "", "", {
+          {"instruction", Expr::memory_read("rom", Expr::variable("address")), std::nullopt},
+      }, {}}}};
+  Engine ir_memory_engine;
+  const auto rom = ir_memory_engine.add_memory("top.rom", 8, 16, LogicWord::known(0, 8));
+  ir_memory_engine.write_memory_now(rom, 3, LogicWord::known(0x93, 8));
+  const auto ir_memory = compile_ir(ir_rom_reader, ir_memory_engine, {}, {{"rom", rom}});
+  ir_memory_engine.write_now(ir_memory.at("address"), LogicWord::known(3, 4));
+  ir_memory_engine.run();
+  require(ir_memory_engine.read(ir_memory.at("instruction")) == LogicWord::known(0x93, 8), "IR memory-read expression did not fetch memory data");
+  ir_memory_engine.write_memory_now(rom, 3, LogicWord::known(0x13, 8));
+  ir_memory_engine.run();
+  require(ir_memory_engine.read(ir_memory.at("instruction")) == LogicWord::known(0x13, 8), "IR memory read was not sensitive to memory writes");
+  ir_memory_engine.write_now(ir_memory.at("address"), LogicWord::x(4));
+  ir_memory_engine.run();
+  require(ir_memory_engine.read(ir_memory.at("instruction")) == LogicWord::x(8), "IR memory read did not return X for unknown address");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;

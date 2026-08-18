@@ -62,6 +62,8 @@ class Engine {
 
   [[nodiscard]] LogicWord read(SignalId signal) const;
   [[nodiscard]] LogicWord read_memory(MemoryId memory, std::size_t address) const;
+  [[nodiscard]] std::uint8_t memory_element_width(MemoryId memory) const;
+  [[nodiscard]] std::size_t memory_depth(MemoryId memory) const;
   [[nodiscard]] const std::string& signal_name(SignalId signal) const;
   [[nodiscard]] std::uint64_t now() const { return time_; }
   [[nodiscard]] const std::vector<WaveChange>& waves() const { return waves_; }

@@ -14,7 +14,7 @@ namespace quiescesim {
 // QuiesceSim-owned, typed RTL IR. Parsers and bootstrap importers may emit this
 // representation, but the native runtime never executes a frontend AST.
 enum class ExprKind {
-  constant, variable,
+  constant, variable, memory_read,
   bit_not, logical_not, bit_and, bit_or, bit_xor,
   add, subtract, shift_left_logical, shift_right_logical,
   equal, not_equal, less_than_unsigned, greater_equal_unsigned,
@@ -33,6 +33,7 @@ struct Expr {
 
   static Expr constant(LogicWord value);
   static Expr variable(std::string name);
+  static Expr memory_read(std::string memory_name, Expr address);
   static Expr unary(ExprKind kind, Expr operand);
   static Expr binary(ExprKind kind, Expr left, Expr right);
   // SystemVerilog conditional-expression semantics, including per-bit merge
@@ -81,5 +82,12 @@ std::unordered_map<std::string, SignalId> compile_ir(const ModuleIR& module, Eng
 std::unordered_map<std::string, SignalId> compile_ir(
     const ModuleIR& module, Engine& engine,
     const std::unordered_map<std::string, SignalId>& bindings);
+// Variant used by hierarchy lowering when a module reads a parent-owned
+// memory. Memories are never copied: the compiled process observes the same
+// event-aware storage as its parent and sibling instances.
+std::unordered_map<std::string, SignalId> compile_ir(
+    const ModuleIR& module, Engine& engine,
+    const std::unordered_map<std::string, SignalId>& signal_bindings,
+    const std::unordered_map<std::string, MemoryId>& memory_bindings);
 
 }  // namespace quiescesim
