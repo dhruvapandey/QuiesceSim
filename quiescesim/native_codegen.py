@@ -19,15 +19,30 @@ class UnsupportedResolvedNode(ValueError):
 
 
 def _widths(root: ET.Element) -> dict[str, int]:
+    types = {node.attrib["id"]: node for node in root.findall(".//typetable/*") if "id" in node.attrib}
     result: dict[str, int] = {}
-    for dtype in root.findall(".//typetable/*"):
-        dtype_id = dtype.attrib.get("id")
-        if dtype_id is None:
-            continue
-        if "left" in dtype.attrib and "right" in dtype.attrib:
-            result[dtype_id] = abs(int(dtype.attrib["left"]) - int(dtype.attrib["right"])) + 1
-        elif dtype.tag == "basicdtype":
+
+    def resolve(dtype_id: str) -> int | None:
+        if dtype_id in result:
+            return result[dtype_id]
+        node = types.get(dtype_id)
+        if node is None or node.tag == "unpackarraydtype":
+            return None
+        if "left" in node.attrib and "right" in node.attrib:
+            result[dtype_id] = abs(int(node.attrib["left"]) - int(node.attrib["right"])) + 1
+            return result[dtype_id]
+        if "sub_dtype_id" in node.attrib:
+            width = resolve(node.attrib["sub_dtype_id"])
+            if width is not None:
+                result[dtype_id] = width
+            return width
+        if node.tag == "basicdtype":
             result[dtype_id] = 1
+            return 1
+        return None
+
+    for dtype_id in types:
+        resolve(dtype_id)
     return result
 
 

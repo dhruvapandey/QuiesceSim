@@ -81,6 +81,16 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertIn("ExprKind::add", generated)
         self.assertIn("generated_adder_ir", generated)
 
+    def test_native_codegen_resolves_reference_dtype_width(self):
+        fixture = """<verilator_xml><netlist><typetable>
+          <basicdtype id=\"3\" name=\"logic\" left=\"2\" right=\"0\"/><refdtype id=\"4\" sub_dtype_id=\"3\"/>
+        </typetable><module name=\"aliased\"><var name=\"opcode\" dtype_id=\"4\"/></module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "aliased.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "aliased", "generated_alias_ir")
+        self.assertIn('{"opcode", 3, LogicWord::x(3)}', generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>
