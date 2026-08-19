@@ -118,6 +118,18 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertEqual(generated.count('Expr::memory_read("source"'), 2)
         self.assertIn('"generated:array-copy:0"', generated)
 
+    def test_native_codegen_lowers_case_with_case_equality_and_default(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"2\" name=\"logic\" left=\"1\" right=\"0\"/></typetable>
+        <module name=\"decode\"><var name=\"op\" dtype_id=\"2\"/><var name=\"y\" dtype_id=\"2\"/>
+          <always><begin><case><varref name=\"op\"/><caseitem><const name=\"2'h0\"/><assign><const name=\"2'h1\"/><varref name=\"y\"/></assign></caseitem><caseitem><begin><assign><const name=\"2'h2\"/><varref name=\"y\"/></assign></begin></caseitem></case></begin></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decode.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "decode", "generated_decode_ir")
+        self.assertIn("ExprKind::case_equal", generated)
+        self.assertIn("ExprKind::logical_not", generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>

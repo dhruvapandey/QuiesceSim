@@ -52,11 +52,20 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
     }
     case ExprKind::equal:
     case ExprKind::not_equal:
+    case ExprKind::case_equal:
     case ExprKind::less_than_unsigned:
     case ExprKind::greater_equal_unsigned: {
       const auto left = evaluate(*expression.left, signals, memories, engine);
       const auto right = evaluate(*expression.right, signals, memories, engine);
       if (left.width != right.width) throw std::invalid_argument("comparison operands must have equal widths");
+      if (expression.kind == ExprKind::case_equal) {
+        const auto width_mask = left.width == 64 ? ~std::uint64_t{0} : ((std::uint64_t{1} << left.width) - 1);
+        const auto left_known = ~(left.x_mask | left.z_mask) & width_mask;
+        const auto right_known = ~(right.x_mask | right.z_mask) & width_mask;
+        const bool matches = left.x_mask == right.x_mask && left.z_mask == right.z_mask &&
+                             ((left.bits ^ right.bits) & left_known & right_known) == 0;
+        return LogicWord::known(matches, 1);
+      }
       if (!left.is_known() || !right.is_known()) return LogicWord::x(1);
       const bool result = expression.kind == ExprKind::equal ? left.as_u64() == right.as_u64()
           : expression.kind == ExprKind::not_equal ? left.as_u64() != right.as_u64()

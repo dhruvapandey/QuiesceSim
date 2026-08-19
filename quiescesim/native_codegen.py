@@ -132,6 +132,15 @@ def _not_guard(condition: str) -> str:
     return f"Expr::unary(ExprKind::logical_not, {condition})"
 
 
+def _or_guard(conditions: list[str]) -> str:
+    if not conditions:
+        return "Expr::constant(LogicWord::known(0, 1))"
+    result = conditions[0]
+    for condition in conditions[1:]:
+        result = f"Expr::binary(ExprKind::bit_or, {result}, {condition})"
+    return result
+
+
 def _target(node: ET.Element) -> tuple[str, str]:
     """Return the whole-signal target name and optional IR slice initializer."""
     if node.tag == "varref":
@@ -157,6 +166,37 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
         result: list[tuple[str, str, str | None]] = []
         for child in node:
             result.extend(_flatten_assignments(child, widths, guard, arrays))
+        return result
+    if node.tag == "case":
+        children = list(node)
+        if len(children) < 2:
+            raise UnsupportedResolvedNode("resolved case statement has no items")
+        selector = _expr(children[0], widths, arrays)
+        explicit_matches: list[str] = []
+        default_item: list[ET.Element] | None = None
+        result: list[tuple[str, str, str | None]] = []
+        for item in children[1:]:
+            if item.tag != "caseitem":
+                raise UnsupportedResolvedNode("resolved case has non-caseitem child")
+            item_children = list(item)
+            label_count = 0
+            while label_count < len(item_children) and item_children[label_count].tag == "const":
+                label_count += 1
+            if label_count == 0:
+                if default_item is not None:
+                    raise UnsupportedResolvedNode("resolved case has multiple defaults")
+                default_item = item_children
+                continue
+            labels = [f"Expr::binary(ExprKind::case_equal, {selector}, {_expr(label, widths, arrays)})"
+                      for label in item_children[:label_count]]
+            item_match = _or_guard(labels)
+            explicit_matches.append(item_match)
+            for statement in item_children[label_count:]:
+                result.extend(_flatten_assignments(statement, widths, _and_guard(guard, item_match), arrays))
+        if default_item is not None:
+            default_guard = _and_guard(guard, _not_guard(_or_guard(explicit_matches)))
+            for statement in default_item:
+                result.extend(_flatten_assignments(statement, widths, default_guard, arrays))
         return result
     if node.tag == "if":
         children = list(node)

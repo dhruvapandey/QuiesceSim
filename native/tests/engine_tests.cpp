@@ -273,6 +273,19 @@ int main() {
   compare_engine.write_now(compare_signals.at("b"), LogicWord::known(0x5b, 8));
   compare_engine.run();
   require(compare_engine.read(compare_signals.at("match")) == LogicWord::known(0, 1), "IR equality did not wake on a changed operand");
+  const ModuleIR ir_case_compare{
+      "ir_case_compare",
+      {{"a", 2, LogicWord::x(2)}, {"b", 2, LogicWord::x(2)}, {"match", 1, LogicWord::x(1)}},
+      {{"ir:case-equal", ProcessKind::combinational, "", "", {{"match", Expr::binary(ExprKind::case_equal, Expr::variable("a"), Expr::variable("b")), std::nullopt}}, {}}}};
+  Engine case_compare_engine;
+  const auto case_compare = compile_ir(ir_case_compare, case_compare_engine);
+  case_compare_engine.write_now(case_compare.at("a"), LogicWord{0, 0x1, 0, 2});
+  case_compare_engine.write_now(case_compare.at("b"), LogicWord{0, 0x1, 0, 2});
+  case_compare_engine.run();
+  require(case_compare_engine.read(case_compare.at("match")) == LogicWord::known(1, 1), "IR case equality did not match identical X bits");
+  case_compare_engine.write_now(case_compare.at("b"), LogicWord::known(0, 2));
+  case_compare_engine.run();
+  require(case_compare_engine.read(case_compare.at("match")) == LogicWord::known(0, 1), "IR case equality did not reject X against known bit");
   const ModuleIR ir_mux{
       "ir_mux",
       {{"sel", 1, LogicWord::x(1)}, {"a", 4, LogicWord::x(4)}, {"b", 4, LogicWord::x(4)}, {"y", 4, LogicWord::x(4)}},

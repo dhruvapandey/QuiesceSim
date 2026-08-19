@@ -17,7 +17,7 @@ enum class ExprKind {
   constant, variable, memory_read,
   bit_not, logical_not, bit_and, bit_or, bit_xor,
   add, subtract, shift_left_logical, shift_right_logical,
-  equal, not_equal, less_than_unsigned, greater_equal_unsigned,
+  equal, not_equal, case_equal, less_than_unsigned, greater_equal_unsigned,
   mux, slice, concat
 };
 
