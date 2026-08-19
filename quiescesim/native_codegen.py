@@ -61,10 +61,28 @@ def _constant(node: ET.Element, widths: dict[str, int]) -> str:
     return f"Expr::constant(LogicWord::known(0x{bits:x}ULL, {width}))"
 
 
-def _expr(node: ET.Element, widths: dict[str, int]) -> str:
+def _array_shapes(root: ET.Element, widths: dict[str, int]) -> dict[str, tuple[int, int]]:
+    result: dict[str, tuple[int, int]] = {}
+    for dtype in root.findall(".//typetable/unpackarraydtype"):
+        element_width = widths.get(dtype.attrib.get("sub_dtype_id", ""))
+        bounds = dtype.findall("range/const")
+        if element_width is None or len(bounds) != 2:
+            continue
+        try:
+            values = [int(html.unescape(item.attrib["name"]).split("'h", 1)[1], 16) for item in bounds]
+        except (KeyError, IndexError, ValueError):
+            continue
+        result[dtype.attrib["id"]] = (element_width, abs(values[0] - values[1]) + 1)
+    return result
+
+
+def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]] | None = None) -> str:
+    arrays = arrays or {}
     tag = node.tag
     children = list(node)
     if tag == "varref":
+        if node.attrib["name"] in arrays:
+            raise UnsupportedResolvedNode(f"whole-array expression requires explicit copy lowering: {node.attrib['name']}")
         return f'Expr::variable("{node.attrib["name"]}")'
     if tag == "const":
         return _constant(node, widths)
@@ -77,15 +95,15 @@ def _expr(node: ET.Element, widths: dict[str, int]) -> str:
     if tag in binary:
         if len(children) != 2:
             raise UnsupportedResolvedNode(f"{tag} expected two operands")
-        return f"Expr::binary(ExprKind::{binary[tag]}, {_expr(children[0], widths)}, {_expr(children[1], widths)})"
+        return f"Expr::binary(ExprKind::{binary[tag]}, {_expr(children[0], widths, arrays)}, {_expr(children[1], widths, arrays)})"
     if tag == "not":
         if len(children) != 1:
             raise UnsupportedResolvedNode("not expected one operand")
-        return f"Expr::unary(ExprKind::logical_not, {_expr(children[0], widths)})"
+        return f"Expr::unary(ExprKind::logical_not, {_expr(children[0], widths, arrays)})"
     if tag == "concat":
         if len(children) != 2:
             raise UnsupportedResolvedNode("concat expected two operands")
-        return f"Expr::concat({_expr(children[0], widths)}, {_expr(children[1], widths)})"
+        return f"Expr::concat({_expr(children[0], widths, arrays)}, {_expr(children[1], widths, arrays)})"
     if tag == "sel":
         if len(children) != 2 or "widthConst" not in node.attrib:
             raise UnsupportedResolvedNode("only constant-width resolved selects are supported")
@@ -98,7 +116,11 @@ def _expr(node: ET.Element, widths: dict[str, int]) -> str:
             raise UnsupportedResolvedNode(f"unsupported select offset: {offset_value}")
         lsb = int(offset_match.group(1).replace("_", ""), 16)
         width = int(node.attrib["widthConst"])
-        return f"Expr::slice({_expr(children[0], widths)}, {lsb + width - 1}, {lsb})"
+        return f"Expr::slice({_expr(children[0], widths, arrays)}, {lsb + width - 1}, {lsb})"
+    if tag == "arraysel":
+        if len(children) != 2 or children[0].tag != "varref" or children[0].attrib.get("name") not in arrays:
+            raise UnsupportedResolvedNode("array select must read a known unpacked-array binding")
+        return f'Expr::memory_read("{children[0].attrib["name"]}", {_expr(children[1], widths, arrays)})'
     raise UnsupportedResolvedNode(f"unsupported resolved expression node: {tag}")
 
 
@@ -110,27 +132,49 @@ def _not_guard(condition: str) -> str:
     return f"Expr::unary(ExprKind::logical_not, {condition})"
 
 
-def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | None = None) -> list[tuple[str, str, str | None]]:
+def _target(node: ET.Element) -> tuple[str, str]:
+    """Return the whole-signal target name and optional IR slice initializer."""
+    if node.tag == "varref":
+        return node.attrib["name"], ""
+    if node.tag == "sel":
+        children = list(node)
+        if len(children) != 2 or children[0].tag != "varref" or children[1].tag != "const" or "widthConst" not in node.attrib:
+            raise UnsupportedResolvedNode("assignment target must be a whole signal or constant select")
+        text = html.unescape(children[1].attrib.get("name", ""))
+        match = re.fullmatch(r"\d+'[sS]?[hH]([0-9a-fA-F_]+)", text)
+        if not match:
+            raise UnsupportedResolvedNode(f"unsupported assignment slice offset: {text}")
+        lsb = int(match.group(1).replace("_", ""), 16)
+        width = int(node.attrib["widthConst"])
+        return children[0].attrib["name"], f", {{{{{lsb + width - 1}, {lsb}}}}}"
+    raise UnsupportedResolvedNode("assignment target must be a whole signal or constant select")
+
+
+def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | None = None,
+                         arrays: dict[str, tuple[int, int]] | None = None) -> list[tuple[str, str, str | None]]:
     """Flatten resolved begin/if trees while preserving statement order."""
     if node.tag == "begin":
         result: list[tuple[str, str, str | None]] = []
         for child in node:
-            result.extend(_flatten_assignments(child, widths, guard))
+            result.extend(_flatten_assignments(child, widths, guard, arrays))
         return result
     if node.tag == "if":
         children = list(node)
         if len(children) not in (2, 3):
             raise UnsupportedResolvedNode("resolved if statement has unsupported shape")
-        condition = _expr(children[0], widths)
-        result = _flatten_assignments(children[1], widths, _and_guard(guard, condition))
+        condition = _expr(children[0], widths, arrays)
+        result = _flatten_assignments(children[1], widths, _and_guard(guard, condition), arrays)
         if len(children) == 3:
-            result.extend(_flatten_assignments(children[2], widths, _and_guard(guard, _not_guard(condition))))
+            result.extend(_flatten_assignments(children[2], widths, _and_guard(guard, _not_guard(condition)), arrays))
         return result
     if node.tag in ("assign", "assigndly"):
         children = list(node)
-        if len(children) != 2 or children[1].tag != "varref":
-            raise UnsupportedResolvedNode("procedural assignment target must be a whole resolved signal")
-        return [(children[1].attrib["name"], _expr(children[0], widths), guard)]
+        if len(children) != 2:
+            raise UnsupportedResolvedNode("procedural assignment has unsupported shape")
+        target, slice_initializer = _target(children[1])
+        if slice_initializer:
+            raise UnsupportedResolvedNode("procedural constant-select targets are not lowered yet")
+        return [(target, _expr(children[0], widths, arrays), guard)]
     raise UnsupportedResolvedNode(f"unsupported resolved statement node: {node.tag}")
 
 
@@ -139,7 +183,7 @@ def _assignment_cpp(assignment: tuple[str, str, str | None]) -> str:
     return f'{{"{target}", {expression}, {guard or "std::nullopt"}}}'
 
 
-def _canonical_async_reset(always: ET.Element, widths: dict[str, int]) -> tuple[str, str, list[tuple[str, str, str | None]], list[tuple[str, str, str | None]]] | None:
+def _canonical_async_reset(always: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]]) -> tuple[str, str, list[tuple[str, str, str | None]], list[tuple[str, str, str | None]]] | None:
     """Recognize ``if (rst_n) normal; else reset;`` after XML resolution."""
     sentree = always.find("sentree")
     if sentree is None:
@@ -159,7 +203,7 @@ def _canonical_async_reset(always: ET.Element, widths: dict[str, int]) -> tuple[
     if len(branches) != 3 or branches[0].tag != "varref" or branches[0].attrib.get("name") != reset_ref.attrib["name"]:
         raise UnsupportedResolvedNode("asynchronous-reset process must test its reset signal directly")
     return (clock_ref.attrib["name"], reset_ref.attrib["name"],
-            _flatten_assignments(branches[1], widths), _flatten_assignments(branches[2], widths))
+            _flatten_assignments(branches[1], widths, arrays=arrays), _flatten_assignments(branches[2], widths, arrays=arrays))
 
 
 def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str:
@@ -171,14 +215,20 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
     """
     root = ET.parse(xml_path).getroot()
     widths = _widths(root)
+    array_types = _array_shapes(root, widths)
     module = next((item for item in root.findall(".//module") if item.attrib.get("name") == module_name), None)
     if module is None:
         raise ValueError(f"resolved XML module not found: {module_name}")
     signals: list[str] = []
+    arrays: dict[str, tuple[int, int]] = {}
     for variable in module.findall("var"):
         if variable.attrib.get("param") == "true" or variable.attrib.get("localparam") == "true":
             continue
-        width = widths.get(variable.attrib.get("dtype_id", ""))
+        dtype_id = variable.attrib.get("dtype_id", "")
+        if dtype_id in array_types:
+            arrays[variable.attrib["name"]] = array_types[dtype_id]
+            continue
+        width = widths.get(dtype_id)
         if width is None or width > 64:
             raise UnsupportedResolvedNode(f"unsupported width for signal {variable.attrib['name']}")
         signals.append(f'{{"{variable.attrib["name"]}", {width}, LogicWord::x({width})}}')
@@ -189,14 +239,27 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
             if len(list(contassign)) != 2:
                 raise UnsupportedResolvedNode("continuous assignment has unsupported shape")
             expression, target = list(contassign)
-            if target.tag != "varref":
-                raise UnsupportedResolvedNode("continuous assignment target must be a whole signal")
+            if target.tag == "varref" and target.attrib["name"] in arrays:
+                if expression.tag != "varref" or expression.attrib.get("name") not in arrays:
+                    raise UnsupportedResolvedNode("whole-array assignment requires a matching array source")
+                target_name, source_name = target.attrib["name"], expression.attrib["name"]
+                if arrays[target_name] != arrays[source_name]:
+                    raise UnsupportedResolvedNode("whole-array assignment has mismatched array shapes")
+                width, depth = arrays[target_name]
+                writes = ", ".join(
+                    f'{{"{target_name}", Expr::constant(LogicWord::known({element}ULL, 32)), '
+                    f'Expr::memory_read("{source_name}", Expr::constant(LogicWord::known({element}ULL, 32))), std::nullopt}}'
+                    for element in range(depth)
+                )
+                processes.append(f'{{"generated:array-copy:{index}", ProcessKind::combinational, "", "", {{}}, {{}}, {{{writes}}}}}')
+                continue
+            target_name, target_slice = _target(target)
             processes.append(
                 f'{{"generated:cont:{index}", ProcessKind::combinational, "", "", '
-                f'{{{{"{target.attrib["name"]}", {_expr(expression, widths)}, std::nullopt}}}}, {{}}}}'
+                f'{{{{"{target_name}", {_expr(expression, widths, arrays)}, std::nullopt{target_slice}}}}}, {{}}}}'
             )
             continue
-        async_reset = _canonical_async_reset(always, widths)
+        async_reset = _canonical_async_reset(always, widths, arrays)
         if async_reset is not None:
             clock, reset, normal, reset_assignments = async_reset
             processes.append(
@@ -210,7 +273,7 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
         body = next(iter(always), None)
         if body is None:
             raise UnsupportedResolvedNode("empty resolved procedural process")
-        assignments = _flatten_assignments(body, widths)
+        assignments = _flatten_assignments(body, widths, arrays=arrays)
         processes.append(
             f'{{"generated:comb:{index}", ProcessKind::combinational, "", "", '
             f'{{{", ".join(_assignment_cpp(item) for item in assignments)}}}, {{}}}}'

@@ -104,6 +104,20 @@ class ElaborateImportTests(unittest.TestCase):
             generated = emit_cpp_module(path, "aliased", "generated_alias_ir")
         self.assertIn('{"opcode", 3, LogicWord::x(3)}', generated)
 
+    def test_native_codegen_expands_whole_array_copy_to_memory_writes(self):
+        fixture = """<verilator_xml><netlist><typetable>
+          <basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/>
+          <unpackarraydtype id=\"9\" sub_dtype_id=\"8\"><range><const name=\"32'h0\"/><const name=\"32'h1\"/></range></unpackarraydtype>
+        </typetable><module name=\"copy\"><var name=\"source\" dtype_id=\"9\"/><var name=\"target\" dtype_id=\"9\"/>
+          <always><contassign><varref name=\"source\"/><varref name=\"target\"/></contassign></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "copy.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "copy", "generated_copy_ir")
+        self.assertEqual(generated.count('Expr::memory_read("source"'), 2)
+        self.assertIn('"generated:array-copy:0"', generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>
