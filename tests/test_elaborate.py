@@ -81,12 +81,15 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertIn("ExprKind::add", generated)
         self.assertIn("generated_adder_ir", generated)
 
-    def test_native_codegen_rejects_unlowered_sequential_logic(self):
-        fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/></typetable>
-        <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><always><sentree/></always></module>
-        </netlist></verilator_xml>"""
+    def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
+        <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>
+        <always><begin><assign><varref name=\"d\"/><varref name=\"q\"/></assign></begin></always>
+        <always><sentree><senitem edgeType=\"POS\"><varref name=\"clk\"/></senitem><senitem edgeType=\"NEG\"><varref name=\"rst_n\"/></senitem></sentree><begin><if><varref name=\"rst_n\"/><begin><assigndly><varref name=\"d\"/><varref name=\"q\"/></assigndly></begin><begin><assigndly><const name=\"8'h0\"/><varref name=\"q\"/></assigndly></begin></if></begin></always>
+        </module></netlist></verilator_xml>"""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "flop.xml"
             path.write_text(fixture)
-            with self.assertRaises(UnsupportedResolvedNode):
-                emit_cpp_module(path, "flop", "generated_flop_ir")
+            generated = emit_cpp_module(path, "flop", "generated_flop_ir")
+        self.assertIn("ProcessKind::combinational", generated)
+        self.assertIn("ProcessKind::posedge_or_negedge_reset", generated)
