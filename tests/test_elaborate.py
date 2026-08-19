@@ -67,6 +67,19 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertEqual(lowered.variables[1]["width"], 8)
         self.assertEqual(lowered.processes[0]["statement_kinds"]["ASSIGN"], 1)
 
+    def test_xml_lowering_describes_unpacked_arrays_as_memories(self):
+        fixture = """<verilator_xml><netlist><typetable>
+          <basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/>
+          <unpackarraydtype id=\"9\" sub_dtype_id=\"8\"><range><const name=\"32'h0\"/><const name=\"32'h3\"/></range></unpackarraydtype>
+        </typetable><module name=\"array_port\"><var name=\"words\" dtype_id=\"9\" dir=\"input\" vartype=\"port\"/></module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "array.xml"
+            path.write_text(fixture)
+            lowered = lower_resolved_xml_module(path, "array_port")
+        self.assertEqual(lowered.variables[0]["storage"], "memory")
+        self.assertEqual(lowered.variables[0]["element_width"], 8)
+        self.assertEqual(lowered.variables[0]["depth"], 4)
+
     def test_native_codegen_emits_supported_resolved_continuous_assignment(self):
         fixture = """<verilator_xml><netlist><typetable>
           <basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/>

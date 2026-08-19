@@ -191,27 +191,56 @@ def lower_resolved_xml_module(xml_path: Path, module_name: str) -> ResolvedModul
     Verilator JSON nor XML.
     """
     root = ET.parse(xml_path).getroot()
+    types = {item.attrib["id"]: item for item in root.findall(".//typetable/*") if "id" in item.attrib}
     widths: dict[str, int] = {}
-    for dtype in root.findall(".//typetable/*"):
-        dtype_id = dtype.attrib.get("id")
-        if dtype_id is None:
-            continue
+
+    def packed_width(dtype_id: str) -> int | None:
+        if dtype_id in widths:
+            return widths[dtype_id]
+        dtype = types.get(dtype_id)
+        if dtype is None or dtype.tag == "unpackarraydtype":
+            return None
         left, right = dtype.attrib.get("left"), dtype.attrib.get("right")
         if left is not None and right is not None:
             widths[dtype_id] = abs(int(left) - int(right)) + 1
+        elif "sub_dtype_id" in dtype.attrib:
+            width = packed_width(dtype.attrib["sub_dtype_id"])
+            if width is not None:
+                widths[dtype_id] = width
         elif dtype.tag == "basicdtype":
             widths[dtype_id] = 1
+        return widths.get(dtype_id)
+
+    def unpacked_shape(dtype_id: str) -> tuple[int, int] | None:
+        dtype = types.get(dtype_id)
+        if dtype is None or dtype.tag != "unpackarraydtype":
+            return None
+        element_width = packed_width(dtype.attrib["sub_dtype_id"])
+        bounds = dtype.findall("range/const")
+        if element_width is None or len(bounds) != 2:
+            return None
+        values = []
+        for bound in bounds:
+            text = bound.attrib.get("name", "")
+            if "'h" not in text:
+                return None
+            values.append(int(text.split("'h", 1)[1], 16))
+        return element_width, abs(values[0] - values[1]) + 1
     module = next((item for item in root.findall(".//module") if item.attrib.get("name") == module_name), None)
     if module is None:
         raise ValueError(f"resolved XML module not found: {module_name}")
     variables = []
     for variable in module.findall("var"):
         dtype_id = variable.attrib.get("dtype_id", "")
+        shape = unpacked_shape(dtype_id)
         variables.append({
             "name": variable.attrib["name"],
             "direction": variable.attrib.get("dir", "NONE").upper(),
             "dtype_name": variable.attrib.get("vartype", ""),
-            "width": widths.get(dtype_id),
+            "width": packed_width(dtype_id),
+            "storage": "memory" if shape is not None else "signal",
+            "element_width": shape[0] if shape is not None else None,
+            "depth": shape[1] if shape is not None else None,
             "source": variable.attrib.get("loc", ""),
         })
     processes = []
