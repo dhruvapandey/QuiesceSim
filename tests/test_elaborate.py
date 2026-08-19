@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from quiescesim.elaborate import fingerprint_file, import_verilator_json, lower_resolved_module, lower_resolved_xml_module
+from quiescesim.native_codegen import UnsupportedResolvedNode, emit_cpp_module
 
 
 class ElaborateImportTests(unittest.TestCase):
@@ -65,3 +66,27 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertEqual(lowered.variables[0]["width"], 1)
         self.assertEqual(lowered.variables[1]["width"], 8)
         self.assertEqual(lowered.processes[0]["statement_kinds"]["ASSIGN"], 1)
+
+    def test_native_codegen_emits_supported_resolved_continuous_assignment(self):
+        fixture = """<verilator_xml><netlist><typetable>
+          <basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/>
+        </typetable><module name=\"adder\">
+          <var name=\"a\" dtype_id=\"8\"/><var name=\"b\" dtype_id=\"8\"/><var name=\"y\" dtype_id=\"8\"/>
+          <always><contassign><add><varref name=\"a\"/><varref name=\"b\"/></add><varref name=\"y\"/></contassign></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "adder.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "adder", "generated_adder_ir")
+        self.assertIn("ExprKind::add", generated)
+        self.assertIn("generated_adder_ir", generated)
+
+    def test_native_codegen_rejects_unlowered_sequential_logic(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/></typetable>
+        <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><always><sentree/></always></module>
+        </netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "flop.xml"
+            path.write_text(fixture)
+            with self.assertRaises(UnsupportedResolvedNode):
+                emit_cpp_module(path, "flop", "generated_flop_ir")
