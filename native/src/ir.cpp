@@ -186,6 +186,10 @@ std::unordered_map<std::string, SignalId> compile_ir(
         if (write.condition) collect_dependencies(*write.condition, signals, unique_sensitivity);
         if (write.condition) collect_memory_dependencies(*write.condition, memory_bindings, unique_memory_sensitivity);
       }
+      for (const auto& assertion : process.assertions) {
+        collect_dependencies(assertion.failure_condition, signals, unique_sensitivity);
+        collect_memory_dependencies(assertion.failure_condition, memory_bindings, unique_memory_sensitivity);
+      }
       std::vector<SignalId> sensitivity(unique_sensitivity.begin(), unique_sensitivity.end());
       std::vector<MemoryId> memory_sensitivity(unique_memory_sensitivity.begin(), unique_memory_sensitivity.end());
       const auto id = engine.add_process(process.name, sensitivity, memory_sensitivity, [signals, memory_bindings, process](Engine& runtime) {
@@ -207,6 +211,10 @@ std::unordered_map<std::string, SignalId> compile_ir(
           const auto memory = memory_bindings.at(write.memory);
           if (address.as_u64() >= runtime.memory_depth(memory)) throw std::invalid_argument("IR memory write address is out of range");
           runtime.write_memory_now(memory, address.as_u64(), evaluate(write.expression, signals, memory_bindings, runtime));
+        }
+        for (const auto& assertion : process.assertions) {
+          const auto failure = evaluate(assertion.failure_condition, signals, memory_bindings, runtime);
+          if (failure.is_known() && failure.as_u64() != 0) throw std::runtime_error("QuiesceSim assertion failed: " + assertion.message);
         }
       });
       engine.schedule_active(id);
@@ -255,6 +263,10 @@ std::unordered_map<std::string, SignalId> compile_ir(
           if (address.as_u64() >= runtime.memory_depth(memory)) throw std::invalid_argument("IR memory write address is out of range");
           runtime.write_memory_nba(memory, address.as_u64(), evaluate(write.expression, signals, memory_bindings, runtime));
         }
+      }
+      for (const auto& assertion : process.assertions) {
+        const auto failure = evaluate(assertion.failure_condition, signals, memory_bindings, runtime);
+        if (failure.is_known() && failure.as_u64() != 0) throw std::runtime_error("QuiesceSim assertion failed: " + assertion.message);
       }
     });
   }

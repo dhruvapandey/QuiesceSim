@@ -70,6 +70,17 @@ struct MemoryWriteIR {
         expression(std::move(expression_in)), condition(std::move(condition_in)) {}
 };
 
+// A failure predicate evaluated in the process event region. A known one
+// stops simulation; unknown predicates are retained as indeterminate rather
+// than treated as a false failure.
+struct AssertionIR {
+  Expr failure_condition;
+  std::string message;
+
+  AssertionIR(Expr failure_condition_in, std::string message_in)
+      : failure_condition(std::move(failure_condition_in)), message(std::move(message_in)) {}
+};
+
 enum class ProcessKind { combinational, posedge, posedge_or_negedge_reset };
 
 struct ProcessIR {
@@ -80,14 +91,17 @@ struct ProcessIR {
   std::vector<AssignmentIR> assignments;
   std::vector<AssignmentIR> reset_assignments;
   std::vector<MemoryWriteIR> memory_writes;
+  std::vector<AssertionIR> assertions;
 
   ProcessIR(std::string name_in, ProcessKind kind_in, std::string clock_in,
             std::string reset_in, std::vector<AssignmentIR> assignments_in,
             std::vector<AssignmentIR> reset_assignments_in,
-            std::vector<MemoryWriteIR> memory_writes_in = {})
+            std::vector<MemoryWriteIR> memory_writes_in = {},
+            std::vector<AssertionIR> assertions_in = {})
       : name(std::move(name_in)), kind(kind_in), clock(std::move(clock_in)),
         reset(std::move(reset_in)), assignments(std::move(assignments_in)),
-        reset_assignments(std::move(reset_assignments_in)), memory_writes(std::move(memory_writes_in)) {}
+        reset_assignments(std::move(reset_assignments_in)), memory_writes(std::move(memory_writes_in)),
+        assertions(std::move(assertions_in)) {}
 };
 
 struct SignalIR { std::string name; std::uint8_t width; LogicWord initial; };

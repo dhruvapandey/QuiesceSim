@@ -449,6 +449,21 @@ int main() {
   ir_writer_engine.schedule_at(4, [=](Engine& runtime) { runtime.write_now(ir_writer.at("clk"), LogicWord::known(1, 1)); });
   ir_writer_engine.run();
   require(ir_writer_engine.read_memory(ram, 7) == LogicWord::known(0xa5, 8), "disabled clocked IR memory write changed memory");
+  const ModuleIR ir_assertion{
+      "ir_assertion",
+      {{"trigger", 1, LogicWord::x(1)}},
+      {{"assert:comb", ProcessKind::combinational, "", "", {}, {}, {}, {
+          {Expr::variable("trigger"), "test assertion"},
+      }}}};
+  Engine assertion_engine;
+  const auto assertion_signals = compile_ir(ir_assertion, assertion_engine);
+  assertion_engine.write_now(assertion_signals.at("trigger"), LogicWord::known(0, 1));
+  assertion_engine.run();
+  assertion_engine.write_now(assertion_signals.at("trigger"), LogicWord::known(1, 1));
+  bool assertion_failed = false;
+  try { assertion_engine.run(); }
+  catch (const std::runtime_error& error) { assertion_failed = std::string(error.what()).find("test assertion") != std::string::npos; }
+  require(assertion_failed, "IR assertion did not stop simulation on known failure");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;
