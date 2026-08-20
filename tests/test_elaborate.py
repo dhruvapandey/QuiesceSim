@@ -130,6 +130,24 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertIn("ExprKind::case_equal", generated)
         self.assertIn("ExprKind::logical_not", generated)
 
+    def test_native_codegen_retains_resolved_unique_case_multiple_match_guard(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id="1" name="logic"/><basicdtype id="2" name="logic" left="1" right="0"/></typetable>
+        <module name="decode"><var name="op" dtype_id="2"/><var name="y" dtype_id="1"/>
+          <always><begin><case><varref name="op"/>
+            <caseitem><const name="2'h0"/><assign><const name="1'h1"/><varref name="y"/></assign></caseitem>
+            <caseitem><assign><const name="1'h0"/><varref name="y"/></assign></caseitem>
+            <if><not><onehot><concat><eq><const name="2'h0"/><varref name="op"/></eq><eq><const name="2'h1"/><varref name="op"/></eq></concat></onehot></not>
+              <begin><if><neq><const name="2'h0"/><concat><eq><const name="2'h0"/><varref name="op"/></eq><eq><const name="2'h1"/><varref name="op"/></eq></concat></neq>
+                <begin><display/><stop/></begin></if></begin></if>
+          </case></begin></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "decode.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "decode", "generated_decode_ir")
+        self.assertIn("ExprKind::onehot", generated)
+        self.assertIn("resolved unique case has multiple matching items", generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>

@@ -100,6 +100,10 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         if len(children) != 1:
             raise UnsupportedResolvedNode("not expected one operand")
         return f"Expr::unary(ExprKind::logical_not, {_expr(children[0], widths, arrays)})"
+    if tag == "onehot":
+        if len(children) != 1:
+            raise UnsupportedResolvedNode("onehot expected one operand")
+        return f"Expr::unary(ExprKind::onehot, {_expr(children[0], widths, arrays)})"
     if tag == "concat":
         if len(children) != 2:
             raise UnsupportedResolvedNode("concat expected two operands")
@@ -159,13 +163,37 @@ def _target(node: ET.Element) -> tuple[str, str]:
     raise UnsupportedResolvedNode("assignment target must be a whole signal or constant select")
 
 
+def _unique_case_failure(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]]) -> str | None:
+    """Lower Verilator's resolved unique-case multiple-match stop into an IR guard.
+
+    The resolved AST retains a synthesis-independent runtime check after the
+    case items: ``!onehot(matches)`` followed by ``matches != 0``.  Together
+    those predicates mean *more than one item matched*.  We preserve that
+    predicate as an assertion instead of silently dropping compiler-inserted
+    safety code.
+    """
+    if node.tag != "if" or len(list(node)) != 2:
+        return None
+    outer_condition, outer_body = list(node)
+    if outer_body.tag != "begin" or len(list(outer_body)) != 1:
+        return None
+    inner = list(outer_body)[0]
+    if inner.tag != "if" or len(list(inner)) != 2:
+        return None
+    inner_condition, inner_body = list(inner)
+    if inner_body.tag != "begin" or not any(child.tag == "stop" for child in inner_body.iter()):
+        return None
+    return _and_guard(_expr(outer_condition, widths, arrays), _expr(inner_condition, widths, arrays))
+
+
 def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | None = None,
-                         arrays: dict[str, tuple[int, int]] | None = None) -> list[tuple[str, str, str | None]]:
+                         arrays: dict[str, tuple[int, int]] | None = None,
+                         assertions: list[tuple[str, str]] | None = None) -> list[tuple[str, str, str | None]]:
     """Flatten resolved begin/if trees while preserving statement order."""
     if node.tag == "begin":
         result: list[tuple[str, str, str | None]] = []
         for child in node:
-            result.extend(_flatten_assignments(child, widths, guard, arrays))
+            result.extend(_flatten_assignments(child, widths, guard, arrays, assertions))
         return result
     if node.tag == "case":
         children = list(node)
@@ -177,10 +205,16 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
         result: list[tuple[str, str, str | None]] = []
         for item in children[1:]:
             if item.tag != "caseitem":
+                failure = _unique_case_failure(item, widths, arrays or {})
+                if failure is not None and assertions is not None:
+                    assertions.append((failure, "resolved unique case has multiple matching items"))
+                    continue
                 raise UnsupportedResolvedNode("resolved case has non-caseitem child")
             item_children = list(item)
             label_count = 0
-            while label_count < len(item_children) and item_children[label_count].tag == "const":
+            # Resolved symbolic enum values may remain as varrefs (rather
+            # than being folded constants), so both are legal case labels.
+            while label_count < len(item_children) and item_children[label_count].tag in ("const", "varref"):
                 label_count += 1
             if label_count == 0:
                 if default_item is not None:
@@ -192,20 +226,20 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
             item_match = _or_guard(labels)
             explicit_matches.append(item_match)
             for statement in item_children[label_count:]:
-                result.extend(_flatten_assignments(statement, widths, _and_guard(guard, item_match), arrays))
+                result.extend(_flatten_assignments(statement, widths, _and_guard(guard, item_match), arrays, assertions))
         if default_item is not None:
             default_guard = _and_guard(guard, _not_guard(_or_guard(explicit_matches)))
             for statement in default_item:
-                result.extend(_flatten_assignments(statement, widths, default_guard, arrays))
+                result.extend(_flatten_assignments(statement, widths, default_guard, arrays, assertions))
         return result
     if node.tag == "if":
         children = list(node)
         if len(children) not in (2, 3):
             raise UnsupportedResolvedNode("resolved if statement has unsupported shape")
         condition = _expr(children[0], widths, arrays)
-        result = _flatten_assignments(children[1], widths, _and_guard(guard, condition), arrays)
+        result = _flatten_assignments(children[1], widths, _and_guard(guard, condition), arrays, assertions)
         if len(children) == 3:
-            result.extend(_flatten_assignments(children[2], widths, _and_guard(guard, _not_guard(condition)), arrays))
+            result.extend(_flatten_assignments(children[2], widths, _and_guard(guard, _not_guard(condition)), arrays, assertions))
         return result
     if node.tag in ("assign", "assigndly"):
         children = list(node)
@@ -221,6 +255,11 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
 def _assignment_cpp(assignment: tuple[str, str, str | None]) -> str:
     target, expression, guard = assignment
     return f'{{"{target}", {expression}, {guard or "std::nullopt"}}}'
+
+
+def _assertion_cpp(assertion: tuple[str, str]) -> str:
+    failure, message = assertion
+    return f'{{{failure}, "{message}"}}'
 
 
 def _canonical_async_reset(always: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]]) -> tuple[str, str, list[tuple[str, str, str | None]], list[tuple[str, str, str | None]]] | None:
@@ -313,10 +352,12 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
         body = next(iter(always), None)
         if body is None:
             raise UnsupportedResolvedNode("empty resolved procedural process")
-        assignments = _flatten_assignments(body, widths, arrays=arrays)
+        assertions: list[tuple[str, str]] = []
+        assignments = _flatten_assignments(body, widths, arrays=arrays, assertions=assertions)
         processes.append(
             f'{{"generated:comb:{index}", ProcessKind::combinational, "", "", '
-            f'{{{", ".join(_assignment_cpp(item) for item in assignments)}}}, {{}}}}'
+            f'{{{", ".join(_assignment_cpp(item) for item in assignments)}}}, {{}}, {{}}, '
+            f'{{{", ".join(_assertion_cpp(item) for item in assertions)}}}}}'
         )
     return "\n".join([
         '#include "quiescesim/ir.hpp"',

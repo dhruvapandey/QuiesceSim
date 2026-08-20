@@ -30,6 +30,12 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
       const auto operand = evaluate(*expression.left, signals, memories, engine);
       return operand.is_known() ? LogicWord::known(operand.as_u64() == 0, 1) : LogicWord::x(1);
     }
+    case ExprKind::onehot: {
+      const auto operand = evaluate(*expression.left, signals, memories, engine);
+      if (!operand.is_known()) return LogicWord::x(1);
+      const auto bits = operand.as_u64();
+      return LogicWord::known(bits != 0 && (bits & (bits - 1)) == 0, 1);
+    }
     case ExprKind::bit_and: return bit_and(evaluate(*expression.left, signals, memories, engine), evaluate(*expression.right, signals, memories, engine));
     case ExprKind::bit_or: return bit_or(evaluate(*expression.left, signals, memories, engine), evaluate(*expression.right, signals, memories, engine));
     case ExprKind::bit_xor: return bit_xor(evaluate(*expression.left, signals, memories, engine), evaluate(*expression.right, signals, memories, engine));

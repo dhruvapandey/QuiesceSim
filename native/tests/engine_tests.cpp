@@ -464,6 +464,22 @@ int main() {
   try { assertion_engine.run(); }
   catch (const std::runtime_error& error) { assertion_failed = std::string(error.what()).find("test assertion") != std::string::npos; }
   require(assertion_failed, "IR assertion did not stop simulation on known failure");
+  const ModuleIR ir_onehot{
+      "ir_onehot",
+      {{"input", 4, LogicWord::x(4)}, {"output", 1, LogicWord::x(1)}},
+      {{"onehot:comb", ProcessKind::combinational, "", "",
+        {{"output", Expr::unary(ExprKind::onehot, Expr::variable("input"))}}, {}}}};
+  Engine onehot_engine;
+  const auto onehot_signals = compile_ir(ir_onehot, onehot_engine);
+  onehot_engine.write_now(onehot_signals.at("input"), LogicWord::known(0x4, 4));
+  onehot_engine.run();
+  require(onehot_engine.read(onehot_signals.at("output")) == LogicWord::known(1, 1), "onehot did not recognize exactly one bit");
+  onehot_engine.write_now(onehot_signals.at("input"), LogicWord::known(0xc, 4));
+  onehot_engine.run();
+  require(onehot_engine.read(onehot_signals.at("output")) == LogicWord::known(0, 1), "onehot did not reject multiple bits");
+  onehot_engine.write_now(onehot_signals.at("input"), LogicWord::x(4));
+  onehot_engine.run();
+  require(onehot_engine.read(onehot_signals.at("output")).is_known() == false, "onehot did not preserve unknown input");
   const std::string ansi_rtl = R"(
     module and_gate(input logic a, input logic b, output logic y);
       assign y = a & b;
