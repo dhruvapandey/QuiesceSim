@@ -132,9 +132,9 @@ class ElaborateImportTests(unittest.TestCase):
 
     def test_native_codegen_retains_resolved_unique_case_multiple_match_guard(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id="1" name="logic"/><basicdtype id="2" name="logic" left="1" right="0"/></typetable>
-        <module name="decode"><var name="op" dtype_id="2"/><var name="y" dtype_id="1"/>
+        <module name="decode"><var name="op" dtype_id="2"/><var name="label" dtype_id="2"/><var name="y" dtype_id="1"/>
           <always><begin><case><varref name="op"/>
-            <caseitem><const name="2'h0"/><assign><const name="1'h1"/><varref name="y"/></assign></caseitem>
+            <caseitem><varref name="label"/><assign><const name="1'h1"/><varref name="y"/></assign></caseitem>
             <caseitem><assign><const name="1'h0"/><varref name="y"/></assign></caseitem>
             <if><not><onehot><concat><eq><const name="2'h0"/><varref name="op"/></eq><eq><const name="2'h1"/><varref name="op"/></eq></concat></onehot></not>
               <begin><if><neq><const name="2'h0"/><concat><eq><const name="2'h0"/><varref name="op"/></eq><eq><const name="2'h1"/><varref name="op"/></eq></concat></neq>

@@ -286,8 +286,17 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
         explicit_matches: list[str] = []
         default_item: list[ET.Element] | None = None
         result: list[tuple[str, str, str | None, str]] = []
+        seen_literal_labels: set[str] = set()
+        distinct_literal_labels = True
         for item in children[1:]:
             if item.tag != "caseitem":
+                # For an exact-case comparison, distinct literal labels are
+                # mutually exclusive even when the selector contains X/Z.
+                # In that proven situation Verilator's generated unique-case
+                # multiple-match stop is unreachable; omit its 65+-bit match
+                # vector rather than truncate it in the native prototype.
+                if distinct_literal_labels:
+                    continue
                 failure = _unique_case_failure(item, widths, arrays or {})
                 if failure is not None and assertions is not None:
                     assertions.append((failure, "resolved unique case has multiple matching items"))
@@ -306,6 +315,14 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
                 continue
             labels = [f"Expr::binary(ExprKind::case_equal, {selector}, {_expr(label, widths, arrays)})"
                       for label in item_children[:label_count]]
+            for label in item_children[:label_count]:
+                if label.tag != "const":
+                    distinct_literal_labels = False
+                    continue
+                literal = html.unescape(label.attrib.get("name", ""))
+                if literal in seen_literal_labels:
+                    distinct_literal_labels = False
+                seen_literal_labels.add(literal)
             item_match = _or_guard(labels)
             explicit_matches.append(item_match)
             for statement in item_children[label_count:]:
