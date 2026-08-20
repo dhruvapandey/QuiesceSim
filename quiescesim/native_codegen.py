@@ -392,7 +392,35 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
             if len(list(contassign)) != 2:
                 raise UnsupportedResolvedNode("continuous assignment has unsupported shape")
             expression, target = list(contassign)
+            # Verilator emits ``unused_*`` unpacked-array sinks to preserve a
+            # source-level unused input.  This exact pattern has no consumer:
+            # it is neither a port nor read anywhere in the resolved module.
+            # Do not attempt to coerce an unpacked array into a scalar merely
+            # to evaluate this lint-preservation assignment.
+            if (target.tag == "varref" and target.attrib.get("name", "").startswith("unused_")
+                    and sum(1 for ref in module.iter("varref") if ref.attrib.get("name") == target.attrib["name"]) == 1):
+                continue
             if target.tag == "varref" and target.attrib["name"] in arrays:
+                if expression.tag == "initarray":
+                    target_name = target.attrib["name"]
+                    _, depth = arrays[target_name]
+                    items = list(expression.findall("inititem"))
+                    if len(items) != depth:
+                        raise UnsupportedResolvedNode("array initializer must assign every element")
+                    writes: list[str] = []
+                    for item in items:
+                        values = list(item)
+                        if len(values) != 1 or "index" not in item.attrib:
+                            raise UnsupportedResolvedNode("array initializer item has unsupported shape")
+                        element = int(item.attrib["index"])
+                        if element < 0 or element >= depth:
+                            raise UnsupportedResolvedNode("array initializer index is out of range")
+                        writes.append(
+                            f'{{"{target_name}", Expr::constant(LogicWord::known({element}ULL, 32)), '
+                            f'{_expr(values[0], widths, arrays)}, std::nullopt}}'
+                        )
+                    processes.append(f'{{"generated:array-init:{index}", ProcessKind::combinational, "", "", {{}}, {{}}, {{{", ".join(writes)}}}}}')
+                    continue
                 if expression.tag != "varref" or expression.attrib.get("name") not in arrays:
                     raise UnsupportedResolvedNode("whole-array assignment requires a matching array source")
                 target_name, source_name = target.attrib["name"], expression.attrib["name"]
