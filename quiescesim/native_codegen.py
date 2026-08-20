@@ -188,10 +188,10 @@ def _unique_case_failure(node: ET.Element, widths: dict[str, int], arrays: dict[
 
 def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | None = None,
                          arrays: dict[str, tuple[int, int]] | None = None,
-                         assertions: list[tuple[str, str]] | None = None) -> list[tuple[str, str, str | None]]:
+                         assertions: list[tuple[str, str]] | None = None) -> list[tuple[str, str, str | None, str]]:
     """Flatten resolved begin/if trees while preserving statement order."""
     if node.tag == "begin":
-        result: list[tuple[str, str, str | None]] = []
+        result: list[tuple[str, str, str | None, str]] = []
         for child in node:
             result.extend(_flatten_assignments(child, widths, guard, arrays, assertions))
         return result
@@ -202,7 +202,7 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
         selector = _expr(children[0], widths, arrays)
         explicit_matches: list[str] = []
         default_item: list[ET.Element] | None = None
-        result: list[tuple[str, str, str | None]] = []
+        result: list[tuple[str, str, str | None, str]] = []
         for item in children[1:]:
             if item.tag != "caseitem":
                 failure = _unique_case_failure(item, widths, arrays or {})
@@ -246,15 +246,13 @@ def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | 
         if len(children) != 2:
             raise UnsupportedResolvedNode("procedural assignment has unsupported shape")
         target, slice_initializer = _target(children[1])
-        if slice_initializer:
-            raise UnsupportedResolvedNode("procedural constant-select targets are not lowered yet")
-        return [(target, _expr(children[0], widths, arrays), guard)]
+        return [(target, _expr(children[0], widths, arrays), guard, slice_initializer)]
     raise UnsupportedResolvedNode(f"unsupported resolved statement node: {node.tag}")
 
 
-def _assignment_cpp(assignment: tuple[str, str, str | None]) -> str:
-    target, expression, guard = assignment
-    return f'{{"{target}", {expression}, {guard or "std::nullopt"}}}'
+def _assignment_cpp(assignment: tuple[str, str, str | None, str]) -> str:
+    target, expression, guard, target_slice = assignment
+    return f'{{"{target}", {expression}, {guard or "std::nullopt"}{target_slice}}}'
 
 
 def _assertion_cpp(assertion: tuple[str, str]) -> str:
@@ -262,7 +260,7 @@ def _assertion_cpp(assertion: tuple[str, str]) -> str:
     return f'{{{failure}, "{message}"}}'
 
 
-def _canonical_async_reset(always: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]]) -> tuple[str, str, list[tuple[str, str, str | None]], list[tuple[str, str, str | None]]] | None:
+def _canonical_async_reset(always: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int, int]]) -> tuple[str, str, list[tuple[str, str, str | None, str]], list[tuple[str, str, str | None, str]]] | None:
     """Recognize ``if (rst_n) normal; else reset;`` after XML resolution."""
     sentree = always.find("sentree")
     if sentree is None:

@@ -148,6 +148,17 @@ class ElaborateImportTests(unittest.TestCase):
         self.assertIn("ExprKind::onehot", generated)
         self.assertIn("resolved unique case has multiple matching items", generated)
 
+    def test_native_codegen_lowers_procedural_constant_select_target(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id="2" name="logic" left="7" right="0"/><basicdtype id="1" name="logic" left="1" right="0"/></typetable>
+        <module name="slice_write"><var name="input" dtype_id="1"/><var name="output" dtype_id="2"/>
+          <always><begin><assign><varref name="input"/><sel widthConst="2"><varref name="output"/><const name="32'h2"/></sel></assign></begin></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "slice_write.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "slice_write", "generated_slice_write_ir")
+        self.assertIn("{3, 2}", generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>
