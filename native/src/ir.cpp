@@ -11,6 +11,7 @@ Expr Expr::unary(ExprKind kind, Expr operand) { return {kind, {}, "", std::make_
 Expr Expr::binary(ExprKind kind, Expr left, Expr right) { return {kind, {}, "", std::make_shared<Expr>(std::move(left)), std::make_shared<Expr>(std::move(right)), nullptr, 0, 0}; }
 Expr Expr::mux(Expr select, Expr when_true, Expr when_false) { return {ExprKind::mux, {}, "", std::make_shared<Expr>(std::move(select)), std::make_shared<Expr>(std::move(when_true)), std::make_shared<Expr>(std::move(when_false)), 0, 0}; }
 Expr Expr::slice(Expr operand, std::uint8_t msb, std::uint8_t lsb) { return {ExprKind::slice, {}, "", std::make_shared<Expr>(std::move(operand)), nullptr, nullptr, msb, lsb}; }
+Expr Expr::zero_extend(Expr operand, std::uint8_t width) { return {ExprKind::zero_extend, {}, "", std::make_shared<Expr>(std::move(operand)), nullptr, nullptr, width, 0}; }
 Expr Expr::concat(Expr high, Expr low) { return {ExprKind::concat, {}, "", std::make_shared<Expr>(std::move(high)), std::make_shared<Expr>(std::move(low)), nullptr, 0, 0}; }
 
 namespace {
@@ -114,6 +115,11 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
       const auto width = static_cast<std::uint8_t>(expression.msb - expression.lsb + 1);
       const auto mask = width == 64 ? ~std::uint64_t{0} : ((std::uint64_t{1} << width) - 1);
       return {(source.bits >> expression.lsb) & mask, (source.x_mask >> expression.lsb) & mask, (source.z_mask >> expression.lsb) & mask, width};
+    }
+    case ExprKind::zero_extend: {
+      const auto source = evaluate(*expression.left, signals, memories, engine);
+      if (expression.msb < source.width || expression.msb > 64) throw std::invalid_argument("IR zero extension width is invalid");
+      return {source.bits, source.x_mask, source.z_mask, expression.msb};
     }
     case ExprKind::concat: {
       const auto high = evaluate(*expression.left, signals, memories, engine);

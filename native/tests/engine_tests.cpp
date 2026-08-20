@@ -343,6 +343,21 @@ int main() {
   signed_shift_engine.write_now(signed_shift.at("amount"), LogicWord::known(8, 8));
   signed_shift_engine.run();
   require(signed_shift_engine.read(signed_shift.at("result")) == LogicWord::known(0xff, 8), "IR oversized arithmetic shift did not sign fill");
+  const ModuleIR ir_extend{
+      "ir_extend",
+      {{"input", 1, LogicWord::x(1)}, {"output", 32, LogicWord::x(32)}},
+      {{"extend:comb", ProcessKind::combinational, "", "", {
+          {"output", Expr::zero_extend(Expr::variable("input"), 32)},
+      }, {}}}};
+  Engine extend_engine;
+  const auto extend_signals = compile_ir(ir_extend, extend_engine);
+  extend_engine.write_now(extend_signals.at("input"), LogicWord::known(1, 1));
+  extend_engine.run();
+  require(extend_engine.read(extend_signals.at("output")) == LogicWord::known(1, 32), "IR zero extension failed");
+  extend_engine.write_now(extend_signals.at("input"), LogicWord::x(1));
+  extend_engine.run();
+  const auto extended_x = extend_engine.read(extend_signals.at("output"));
+  require(extended_x.x_mask == 1 && extended_x.bits == 0, "IR zero extension did not retain only source X bits");
   alu_engine.write_now(alu.at("a"), LogicWord::x(8));
   alu_engine.run();
   require(alu_engine.read(alu.at("result")) == LogicWord::x(8), "IR arithmetic did not propagate unknown input");

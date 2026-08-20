@@ -132,6 +132,13 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         if len(children) != 3:
             raise UnsupportedResolvedNode("cond expected selector and two branches")
         return f"Expr::mux({_expr(children[0], widths, arrays)}, {_expr(children[1], widths, arrays)}, {_expr(children[2], widths, arrays)})"
+    if tag == "extend":
+        if len(children) != 1 or "width" not in node.attrib:
+            raise UnsupportedResolvedNode("extend expected one operand and resolved width")
+        width = int(node.attrib["width"])
+        if width > 64:
+            raise UnsupportedResolvedNode("extension wider than native prototype")
+        return f"Expr::zero_extend({_expr(children[0], widths, arrays)}, {width})"
     if tag == "concat":
         if len(children) != 2:
             raise UnsupportedResolvedNode("concat expected two operands")

@@ -18,7 +18,7 @@ enum class ExprKind {
   bit_not, logical_not, onehot, bit_and, bit_or, bit_xor,
   add, subtract, shift_left_logical, shift_right_logical, shift_right_arithmetic,
   equal, not_equal, case_equal, less_than_unsigned, greater_equal_unsigned,
-  mux, slice, concat
+  mux, slice, zero_extend, concat
 };
 
 struct Expr {
@@ -40,6 +40,7 @@ struct Expr {
   // when the selector is X/Z.
   static Expr mux(Expr select, Expr when_true, Expr when_false);
   static Expr slice(Expr operand, std::uint8_t msb, std::uint8_t lsb);
+  static Expr zero_extend(Expr operand, std::uint8_t width);
   static Expr concat(Expr high, Expr low);
 };
 
