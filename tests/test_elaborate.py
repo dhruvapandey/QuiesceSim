@@ -159,6 +159,17 @@ class ElaborateImportTests(unittest.TestCase):
             generated = emit_cpp_module(path, "slice_write", "generated_slice_write_ir")
         self.assertIn("{3, 2}", generated)
 
+    def test_native_codegen_lowers_resolved_conditional_expression(self):
+        fixture = """<verilator_xml><netlist><typetable><basicdtype id="1" name="logic"/></typetable>
+        <module name="mux"><var name="s" dtype_id="1"/><var name="a" dtype_id="1"/><var name="b" dtype_id="1"/><var name="y" dtype_id="1"/>
+          <always><contassign><cond><varref name="s"/><varref name="a"/><varref name="b"/></cond><varref name="y"/></contassign></always>
+        </module></netlist></verilator_xml>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mux.xml"
+            path.write_text(fixture)
+            generated = emit_cpp_module(path, "mux", "generated_mux_ir")
+        self.assertIn("Expr::mux", generated)
+
     def test_native_codegen_lowers_comb_and_canonical_async_reset(self):
         fixture = """<verilator_xml><netlist><typetable><basicdtype id=\"1\" name=\"logic\"/><basicdtype id=\"8\" name=\"logic\" left=\"7\" right=\"0\"/></typetable>
         <module name=\"flop\"><var name=\"clk\" dtype_id=\"1\"/><var name=\"rst_n\" dtype_id=\"1\"/><var name=\"d\" dtype_id=\"8\"/><var name=\"q\" dtype_id=\"8\"/>
