@@ -12,6 +12,7 @@ import html
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 
 
 class UnsupportedResolvedNode(ValueError):
@@ -190,11 +191,66 @@ def _unique_case_failure(node: ET.Element, widths: dict[str, int], arrays: dict[
     return _and_guard(_expr(outer_condition, widths, arrays), _expr(inner_condition, widths, arrays))
 
 
+def _unroll_static_counted_loop(block: ET.Element) -> list[ET.Element] | None:
+    """Expand a resolved, bounded integer ``for`` loop at lowering time.
+
+    This is deliberately structural, not a general runtime loop interpreter:
+    it accepts only an integer initialized to zero, a constant upper-bound
+    ``upper > i`` predicate, and an increment in the final loop statement.
+    Every unrolled iteration substitutes a constant for ``i``.  That turns
+    dynamic selects in the body into the constant selects supported by the
+    exact native IR.
+    """
+    children = list(block)
+    if len(children) != 3 or children[0].tag != "var" or children[1].tag != "assign" or children[2].tag != "loop":
+        return None
+    iterator = children[0].attrib.get("name")
+    init = list(children[1])
+    if not iterator or len(init) != 2 or init[0].tag != "const" or init[1].tag != "varref" or init[1].attrib.get("name") != iterator:
+        return None
+    if html.unescape(init[0].attrib.get("name", "")) not in ("32'sh0", "32'h0"):
+        return None
+    loop_children = list(children[2])
+    if len(loop_children) != 1 or loop_children[0].tag != "begin":
+        return None
+    loop_body = list(loop_children[0])
+    if len(loop_body) != 3 or loop_body[0].tag != "looptest" or loop_body[1].tag != "begin" or loop_body[2].tag != "assign":
+        return None
+    test = list(loop_body[0])
+    if len(test) != 1 or test[0].tag != "gt" or len(list(test[0])) != 2:
+        return None
+    upper, iterator_ref = list(test[0])
+    if upper.tag != "const" or iterator_ref.tag != "varref" or iterator_ref.attrib.get("name") != iterator:
+        return None
+    match = re.fullmatch(r"32'[sS]?[hH]([0-9a-fA-F_]+)", html.unescape(upper.attrib.get("name", "")))
+    if not match:
+        return None
+    upper_bound = int(match.group(1).replace("_", ""), 16)
+    if upper_bound > 256:
+        return None
+    result: list[ET.Element] = []
+    for value in range(upper_bound):
+        for statement in list(loop_body[1]):
+            expanded = deepcopy(statement)
+            for reference in expanded.iter("varref"):
+                if reference.attrib.get("name") == iterator:
+                    reference.tag = "const"
+                    reference.attrib.clear()
+                    reference.attrib.update({"name": f"32'h{value:x}", "dtype_id": children[0].attrib.get("dtype_id", "")})
+            result.append(expanded)
+    return result
+
+
 def _flatten_assignments(node: ET.Element, widths: dict[str, int], guard: str | None = None,
                          arrays: dict[str, tuple[int, int]] | None = None,
                          assertions: list[tuple[str, str]] | None = None) -> list[tuple[str, str, str | None, str]]:
     """Flatten resolved begin/if trees while preserving statement order."""
     if node.tag == "begin":
+        if (unrolled := _unroll_static_counted_loop(node)) is not None:
+            result: list[tuple[str, str, str | None, str]] = []
+            for statement in unrolled:
+                result.extend(_flatten_assignments(statement, widths, guard, arrays, assertions))
+            return result
         result: list[tuple[str, str, str | None, str]] = []
         for child in node:
             result.extend(_flatten_assignments(child, widths, guard, arrays, assertions))
