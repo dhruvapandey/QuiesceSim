@@ -62,6 +62,29 @@ def _constant(node: ET.Element, widths: dict[str, int]) -> str:
     return f"Expr::constant(LogicWord::known(0x{bits:x}ULL, {width}))"
 
 
+def _constant_value(node: ET.Element) -> int | None:
+    """Evaluate the small constant-expression subset used for resolved indices."""
+    if node.tag == "const":
+        text = html.unescape(node.attrib.get("name", ""))
+        match = re.fullmatch(r"(\d+)'[sS]?[hH]([0-9a-fA-F_]+)", text)
+        if match:
+            return int(match.group(2).replace("_", ""), 16)
+        match = re.fullmatch(r"(\d+)'[sS]?[bB]([01_]+)", text)
+        return int(match.group(2).replace("_", ""), 2) if match else None
+    children = list(node)
+    if node.tag in ("add", "sub") and len(children) == 2:
+        left, right = _constant_value(children[0]), _constant_value(children[1])
+        if left is None or right is None:
+            return None
+        return left + right if node.tag == "add" else left - right
+    if node.tag == "sel" and len(children) == 2 and "widthConst" in node.attrib:
+        source, offset = _constant_value(children[0]), _constant_value(children[1])
+        if source is None or offset is None:
+            return None
+        return (source >> offset) & ((1 << int(node.attrib["widthConst"])) - 1)
+    return None
+
+
 def _array_shapes(root: ET.Element, widths: dict[str, int]) -> dict[str, tuple[int, int]]:
     result: dict[str, tuple[int, int]] = {}
     for dtype in root.findall(".//typetable/unpackarraydtype"):
@@ -116,14 +139,9 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
     if tag == "sel":
         if len(children) != 2 or "widthConst" not in node.attrib:
             raise UnsupportedResolvedNode("only constant-width resolved selects are supported")
-        offset = children[1]
-        if offset.tag != "const":
-            raise UnsupportedResolvedNode("only constant-offset resolved selects are supported")
-        offset_value = html.unescape(offset.attrib["name"])
-        offset_match = re.fullmatch(r"\d+'[sS]?[hH]([0-9a-fA-F_]+)", offset_value)
-        if not offset_match:
-            raise UnsupportedResolvedNode(f"unsupported select offset: {offset_value}")
-        lsb = int(offset_match.group(1).replace("_", ""), 16)
+        lsb = _constant_value(children[1])
+        if lsb is None:
+            raise UnsupportedResolvedNode("only constant-foldable resolved select offsets are supported")
         width = int(node.attrib["widthConst"])
         return f"Expr::slice({_expr(children[0], widths, arrays)}, {lsb + width - 1}, {lsb})"
     if tag == "arraysel":
@@ -156,13 +174,11 @@ def _target(node: ET.Element) -> tuple[str, str]:
         return node.attrib["name"], ""
     if node.tag == "sel":
         children = list(node)
-        if len(children) != 2 or children[0].tag != "varref" or children[1].tag != "const" or "widthConst" not in node.attrib:
+        if len(children) != 2 or children[0].tag != "varref" or "widthConst" not in node.attrib:
             raise UnsupportedResolvedNode("assignment target must be a whole signal or constant select")
-        text = html.unescape(children[1].attrib.get("name", ""))
-        match = re.fullmatch(r"\d+'[sS]?[hH]([0-9a-fA-F_]+)", text)
-        if not match:
-            raise UnsupportedResolvedNode(f"unsupported assignment slice offset: {text}")
-        lsb = int(match.group(1).replace("_", ""), 16)
+        lsb = _constant_value(children[1])
+        if lsb is None:
+            raise UnsupportedResolvedNode("assignment target select offset is not constant-foldable")
         width = int(node.attrib["widthConst"])
         return children[0].attrib["name"], f", {{{{{lsb + width - 1}, {lsb}}}}}"
     raise UnsupportedResolvedNode("assignment target must be a whole signal or constant select")
