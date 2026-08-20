@@ -328,6 +328,21 @@ int main() {
   require(alu_engine.read(alu.at("result")) == LogicWord::known(127, 8), "IR subtraction or logical shift did not wrap at signal width");
   require(alu_engine.read(alu.at("less")) == LogicWord::known(1, 1), "IR unsigned comparison failed");
   require(alu_engine.read(alu.at("zero")) == LogicWord::known(0, 1), "IR logical negation failed");
+  const ModuleIR ir_signed_shift{
+      "ir_signed_shift",
+      {{"a", 8, LogicWord::x(8)}, {"amount", 8, LogicWord::x(8)}, {"result", 8, LogicWord::x(8)}},
+      {{"ir:sra", ProcessKind::combinational, "", "", {
+          {"result", Expr::binary(ExprKind::shift_right_arithmetic, Expr::variable("a"), Expr::variable("amount"))},
+      }, {}}}};
+  Engine signed_shift_engine;
+  const auto signed_shift = compile_ir(ir_signed_shift, signed_shift_engine);
+  signed_shift_engine.write_now(signed_shift.at("a"), LogicWord::known(0x80, 8));
+  signed_shift_engine.write_now(signed_shift.at("amount"), LogicWord::known(1, 8));
+  signed_shift_engine.run();
+  require(signed_shift_engine.read(signed_shift.at("result")) == LogicWord::known(0xc0, 8), "IR arithmetic shift did not sign extend");
+  signed_shift_engine.write_now(signed_shift.at("amount"), LogicWord::known(8, 8));
+  signed_shift_engine.run();
+  require(signed_shift_engine.read(signed_shift.at("result")) == LogicWord::known(0xff, 8), "IR oversized arithmetic shift did not sign fill");
   alu_engine.write_now(alu.at("a"), LogicWord::x(8));
   alu_engine.run();
   require(alu_engine.read(alu.at("result")) == LogicWord::x(8), "IR arithmetic did not propagate unknown input");

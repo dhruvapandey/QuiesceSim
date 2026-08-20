@@ -16,7 +16,7 @@ namespace quiescesim {
 enum class ExprKind {
   constant, variable, memory_read,
   bit_not, logical_not, onehot, bit_and, bit_or, bit_xor,
-  add, subtract, shift_left_logical, shift_right_logical,
+  add, subtract, shift_left_logical, shift_right_logical, shift_right_arithmetic,
   equal, not_equal, case_equal, less_than_unsigned, greater_equal_unsigned,
   mux, slice, concat
 };

@@ -90,7 +90,7 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         "add": "add", "sub": "subtract", "and": "bit_and", "or": "bit_or",
         "xor": "bit_xor", "eq": "equal", "neq": "not_equal",
         "lt": "less_than_unsigned", "gte": "greater_equal_unsigned",
-        "shiftr": "shift_right_logical", "shiftl": "shift_left_logical",
+        "shiftr": "shift_right_logical", "shiftrs": "shift_right_arithmetic", "shiftl": "shift_left_logical",
     }
     if tag in binary:
         if len(children) != 2:

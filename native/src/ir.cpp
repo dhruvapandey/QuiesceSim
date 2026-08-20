@@ -48,13 +48,25 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
       return LogicWord::known(expression.kind == ExprKind::add ? left.as_u64() + right.as_u64() : left.as_u64() - right.as_u64(), left.width);
     }
     case ExprKind::shift_left_logical:
-    case ExprKind::shift_right_logical: {
+    case ExprKind::shift_right_logical:
+    case ExprKind::shift_right_arithmetic: {
       const auto left = evaluate(*expression.left, signals, memories, engine);
       const auto right = evaluate(*expression.right, signals, memories, engine);
       if (!left.is_known() || !right.is_known()) return LogicWord::x(left.width);
       const auto amount = right.as_u64();
-      if (amount >= left.width) return LogicWord::known(0, left.width);
-      return LogicWord::known(expression.kind == ExprKind::shift_left_logical ? left.as_u64() << amount : left.as_u64() >> amount, left.width);
+      if (expression.kind == ExprKind::shift_left_logical) {
+        if (amount >= left.width) return LogicWord::known(0, left.width);
+        return LogicWord::known(left.as_u64() << amount, left.width);
+      }
+      if (expression.kind == ExprKind::shift_right_logical) {
+        if (amount >= left.width) return LogicWord::known(0, left.width);
+        return LogicWord::known(left.as_u64() >> amount, left.width);
+      }
+      const auto width_mask = left.width == 64 ? ~std::uint64_t{0} : ((std::uint64_t{1} << left.width) - 1);
+      const bool negative = ((left.as_u64() >> (left.width - 1)) & 1U) != 0;
+      if (amount >= left.width) return LogicWord::known(negative ? width_mask : 0, left.width);
+      if (amount == 0 || !negative) return LogicWord::known(left.as_u64() >> amount, left.width);
+      return LogicWord::known((left.as_u64() >> amount) | (width_mask << (left.width - amount)), left.width);
     }
     case ExprKind::equal:
     case ExprKind::not_equal:
