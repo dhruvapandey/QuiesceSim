@@ -139,6 +139,18 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         if width > 64:
             raise UnsupportedResolvedNode("extension wider than native prototype")
         return f"Expr::zero_extend({_expr(children[0], widths, arrays)}, {width})"
+    if tag == "replicate":
+        if len(children) != 2:
+            raise UnsupportedResolvedNode("replicate expected value and count")
+        count = _constant_value(children[1])
+        width = widths.get(node.attrib.get("dtype_id", ""))
+        if count is None or count < 1 or width is None or width > 64:
+            raise UnsupportedResolvedNode("replicate count or result width is unsupported")
+        value = _expr(children[0], widths, arrays)
+        result = value
+        for _ in range(count - 1):
+            result = f"Expr::concat({result}, {value})"
+        return result
     if tag == "concat":
         if len(children) != 2:
             raise UnsupportedResolvedNode("concat expected two operands")
