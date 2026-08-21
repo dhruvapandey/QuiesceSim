@@ -120,6 +120,12 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         if len(children) != 2:
             raise UnsupportedResolvedNode(f"{tag} expected two operands")
         return f"Expr::binary(ExprKind::{binary[tag]}, {_expr(children[0], widths, arrays)}, {_expr(children[1], widths, arrays)})"
+    if tag == "eqwild":
+        if len(children) != 2 or children[1].tag != "const" or _constant_value(children[1]) is None:
+            raise UnsupportedResolvedNode("wildcard equality requires a fully-known literal pattern")
+        # With no wildcard bits on the RHS, wildcard equality is exact case
+        # equality (known 0/1 even when the state operand is X/Z).
+        return f"Expr::binary(ExprKind::case_equal, {_expr(children[0], widths, arrays)}, {_expr(children[1], widths, arrays)})"
     if tag == "not":
         if len(children) != 1:
             raise UnsupportedResolvedNode("not expected one operand")
