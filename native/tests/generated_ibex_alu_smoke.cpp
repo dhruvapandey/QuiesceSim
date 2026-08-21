@@ -25,6 +25,7 @@ int main() {
   write("multdiv_operand_b_i", 0, 33);
   write("multdiv_sel_i", 0, 1);
   engine.run();
+  if (engine.read(signals.at("result_o")) != LogicWord::known(3, 32)) return 3;
   if (engine.read_memory(imd_output, 0) != LogicWord::known(0, 32)) return 1;
   if (engine.read_memory(imd_output, 1) != LogicWord::known(0, 32)) return 2;
   std::cout << "PASS: generated resolved Ibex ALU executed natively\n";
