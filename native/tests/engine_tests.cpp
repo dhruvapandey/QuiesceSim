@@ -358,6 +358,23 @@ int main() {
   extend_engine.run();
   const auto extended_x = extend_engine.read(extend_signals.at("output"));
   require(extended_x.x_mask == 1 && extended_x.bits == 0, "IR zero extension did not retain only source X bits");
+  const ModuleIR ir_reduction_or{
+      "ir_reduction_or",
+      {{"input", 4, LogicWord::x(4)}, {"output", 1, LogicWord::x(1)}},
+      {{"redor:comb", ProcessKind::combinational, "", "", {
+          {"output", Expr::unary(ExprKind::reduction_or, Expr::variable("input"))},
+      }, {}}}};
+  Engine reduction_engine;
+  const auto reduction_signals = compile_ir(ir_reduction_or, reduction_engine);
+  reduction_engine.write_now(reduction_signals.at("input"), LogicWord::known(0, 4));
+  reduction_engine.run();
+  require(reduction_engine.read(reduction_signals.at("output")) == LogicWord::known(0, 1), "IR reduction-or did not recognize all zero");
+  reduction_engine.write_now(reduction_signals.at("input"), LogicWord::known(0x4, 4));
+  reduction_engine.run();
+  require(reduction_engine.read(reduction_signals.at("output")) == LogicWord::known(1, 1), "IR reduction-or did not recognize a known one");
+  reduction_engine.write_now(reduction_signals.at("input"), LogicWord::x(4));
+  reduction_engine.run();
+  require(!reduction_engine.read(reduction_signals.at("output")).is_known(), "IR reduction-or lost all-unknown state");
   alu_engine.write_now(alu.at("a"), LogicWord::x(8));
   alu_engine.run();
   require(alu_engine.read(alu.at("result")) == LogicWord::x(8), "IR arithmetic did not propagate unknown input");

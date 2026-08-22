@@ -31,6 +31,13 @@ LogicWord evaluate(const Expr& expression, const std::unordered_map<std::string,
       const auto operand = evaluate(*expression.left, signals, memories, engine);
       return operand.is_known() ? LogicWord::known(operand.as_u64() == 0, 1) : LogicWord::x(1);
     }
+    case ExprKind::reduction_or: {
+      const auto operand = evaluate(*expression.left, signals, memories, engine);
+      const auto width_mask = operand.width == 64 ? ~std::uint64_t{0} : ((std::uint64_t{1} << operand.width) - 1);
+      const auto known_one = operand.bits & ~(operand.x_mask | operand.z_mask) & width_mask;
+      if (known_one != 0) return LogicWord::known(1, 1);
+      return operand.is_known() ? LogicWord::known(0, 1) : LogicWord::x(1);
+    }
     case ExprKind::onehot: {
       const auto operand = evaluate(*expression.left, signals, memories, engine);
       if (!operand.is_known()) return LogicWord::x(1);

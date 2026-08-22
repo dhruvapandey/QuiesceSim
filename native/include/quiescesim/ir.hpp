@@ -15,7 +15,7 @@ namespace quiescesim {
 // representation, but the native runtime never executes a frontend AST.
 enum class ExprKind {
   constant, variable, memory_read,
-  bit_not, logical_not, onehot, bit_and, bit_or, bit_xor,
+  bit_not, logical_not, reduction_or, onehot, bit_and, bit_or, bit_xor,
   add, subtract, shift_left_logical, shift_right_logical, shift_right_arithmetic,
   equal, not_equal, case_equal, less_than_unsigned, greater_equal_unsigned,
   mux, slice, zero_extend, concat

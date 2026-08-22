@@ -130,6 +130,10 @@ def _expr(node: ET.Element, widths: dict[str, int], arrays: dict[str, tuple[int,
         if len(children) != 1:
             raise UnsupportedResolvedNode("not expected one operand")
         return f"Expr::unary(ExprKind::bit_not, {_expr(children[0], widths, arrays)})"
+    if tag == "redor":
+        if len(children) != 1:
+            raise UnsupportedResolvedNode("redor expected one operand")
+        return f"Expr::unary(ExprKind::reduction_or, {_expr(children[0], widths, arrays)})"
     if tag == "onehot":
         if len(children) != 1:
             raise UnsupportedResolvedNode("onehot expected one operand")
