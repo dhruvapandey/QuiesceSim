@@ -442,6 +442,22 @@ def emit_cpp_module(xml_path: Path, module_name: str, function_name: str) -> str
             if (target.tag == "varref" and target.attrib.get("name", "").startswith("unused_")
                     and sum(1 for ref in module.iter("varref") if ref.attrib.get("name") == target.attrib["name"]) == 1):
                 continue
+            if target.tag == "arraysel":
+                target_children = list(target)
+                if (len(target_children) != 2 or target_children[0].tag != "varref"
+                        or target_children[0].attrib.get("name") not in arrays):
+                    raise UnsupportedResolvedNode("continuous array write requires a known array binding")
+                address = _constant_value(target_children[1])
+                _, depth = arrays[target_children[0].attrib["name"]]
+                if address is None or address < 0 or address >= depth:
+                    raise UnsupportedResolvedNode("continuous array write index is not a valid constant")
+                target_name = target_children[0].attrib["name"]
+                processes.append(
+                    f'{{"generated:array-write:{index}", ProcessKind::combinational, "", "", {{}}, {{}}, '
+                    f'{{{{"{target_name}", Expr::constant(LogicWord::known({address}ULL, 32)), '
+                    f'{_expr(expression, widths, arrays)}, std::nullopt}}}}}}'
+                )
+                continue
             if target.tag == "varref" and target.attrib["name"] in arrays:
                 if expression.tag == "initarray":
                     target_name = target.attrib["name"]
